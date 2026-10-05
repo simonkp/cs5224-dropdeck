@@ -21,6 +21,8 @@ Buyers may join from the entry window (default 15 min before open) until open pl
 
 The controller closes a drop at its end time, or as soon as every variant is gone and no hold is open, which is at most one hold window after the last sale and immediate when every hold is confirmed (the preliminary plan said "one hold window after the last sell-out").
 
+A ticket's claim window starts at its admission time or its signed issue time, whichever is later; otherwise a buyer arriving after their number came up (demand below the admission rate) would be refused as expired on arrival.
+
 Ticket load spreads over the entry window. The fairness experiment compares draw on and off. The peak becomes less sharp, so the cost comparison must use the measured peak, not the 1000:1 headline.
 
 ## Change from the preliminary report

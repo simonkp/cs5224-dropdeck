@@ -2,7 +2,7 @@ import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import { randomInt, randomUUID } from 'node:crypto';
 import { PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import {
-  admissionStartsAt, admittedAt, ApiError, checkAdmission, dropAdmissionRate, errorResult, FREEZE_DELAY_MS, json, keys,
+  admissionStartsAt, admittedAt, ApiError, checkAdmission, claimWindowStart, dropAdmissionRate, errorResult, FREEZE_DELAY_MS, json, keys,
   parseBody, shardCapacities, sign, ticketId, verifyTicket, type Drop, type Hold, type Variant,
 } from '@dropdeck/shared';
 import { ddb, getDropCached, getHold, isConditionFailure, returnUnits, table } from '@dropdeck/shared/ddb';
@@ -78,7 +78,7 @@ export async function handler(event: APIGatewayProxyEventV2) {
       throw new ApiError('NOT_ADMITTED', 'The queue has not started moving yet', Math.max(1, Math.ceil((start + FREEZE_DELAY_MS - now) / 1000)));
     }
     const rate = dropAdmissionRate(drop);
-    const at = admittedAt('r' in ticket ? { r: ticket.r } : { n: ticket.n }, start, rate, drop.earlyCount);
+    const at = claimWindowStart(admittedAt('r' in ticket ? { r: ticket.r } : { n: ticket.n }, start, rate, drop.earlyCount), ticket.iat);
     const admission = checkAdmission(at, drop.admitWindowSec, now);
     if (!admission.ok) {
       throw new ApiError(

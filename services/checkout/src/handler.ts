@@ -7,11 +7,12 @@ import {
 } from '@dropdeck/shared';
 import { ddb, getDropCached, getHold, getProfile, isConditionFailure, releaseHold, strip, table } from '@dropdeck/shared/ddb';
 import { ssmSecret } from '@dropdeck/shared/secrets';
+import { checkCode, sendCode } from './otp.js';
 
 /**
  * GET  /api/holds/{holdId}           resume a hold (or its confirmation) after a refresh
- * POST /api/holds/{holdId}/otp       email code: Phase 4 (decision 0002)
- * POST /api/holds/{holdId}/confirm   { name, email } → order; payment is a PayNow handoff (decision 0004)
+ * POST /api/holds/{holdId}/otp       { email } → 6-digit code by email (drops with verification 'email')
+ * POST /api/holds/{holdId}/confirm   { name, email, code? } → order; payment is a PayNow handoff (decision 0004)
  *
  * The hold token travels as `Authorization: Bearer <token>`.
  */
@@ -71,20 +72,20 @@ async function ensureOrder(drop: Drop, hold: Hold): Promise<Order> {
   return order;
 }
 
-async function confirm(drop: Drop, hold: Hold, body: { name?: unknown; email?: unknown }, now: number) {
+async function confirm(drop: Drop, hold: Hold, body: { name?: unknown; email?: unknown; code?: unknown }, now: number) {
   if (hold.state === 'confirmed') return confirmation(drop, await ensureOrder(drop, hold));
   // Closed still allows checkout: a buyer holding stock at endAt keeps the rest of their hold window.
   if (drop.state === 'Cancelled') throw new ApiError('INVALID_STATE', 'This drop was cancelled by the merchant');
   if (hold.state !== 'active' || hold.expiresAt <= now) throw new ApiError('HOLD_EXPIRED', 'Your hold has expired');
-  if (drop.verification === 'email') {
-    // Phase 4 adds the email code; until then only drops with verification off can check out.
-    throw new ApiError('NOT_IMPLEMENTED', 'Email verification is not available yet');
-  }
   const name = typeof body.name === 'string' ? body.name.trim().slice(0, 80) : '';
   const email = typeof body.email === 'string' ? body.email.trim() : '';
   if (!name) throw new ApiError('VALIDATION', 'Please enter your name');
   if (!isPlausibleEmail(email)) throw new ApiError('VALIDATION', 'Please enter a valid email');
-  const limitKey = keys.buyerLimit(drop.tenantId, drop.dropId, emailHash(normaliseEmail(email), await emailKey()));
+  const key = await emailKey();
+  // With verification on, the address must be the one the current code went to, and the code must still be
+  // current when the hold flips (a resend in between changes the hash and fails the flip).
+  const verifiedHash = drop.verification === 'email' ? await checkCode(drop, hold, email, body.code, key, now) : undefined;
+  const limitKey = keys.buyerLimit(drop.tenantId, drop.dropId, emailHash(normaliseEmail(email), key));
 
   // One order per address per drop: a conditional put on its own item (a retry by the same hold passes).
   try {
@@ -106,9 +107,12 @@ async function confirm(drop: Drop, hold: Hold, body: { name?: unknown; email?: u
       TableName: table(),
       Key: keys.hold(drop.tenantId, drop.dropId, hold.holdId),
       UpdateExpression: 'SET #s = :confirmed, orderRef = :ref, #n = :name, email = :email REMOVE GSI1PK, GSI1SK',
-      ConditionExpression: '#s = :active AND expiresAt > :now',
+      ConditionExpression: `#s = :active AND expiresAt > :now${verifiedHash ? ' AND otpHash = :otp' : ''}`,
       ExpressionAttributeNames: { '#s': 'state', '#n': 'name' },
-      ExpressionAttributeValues: { ':confirmed': 'confirmed', ':active': 'active', ':ref': ref, ':name': name, ':email': email, ':now': now },
+      ExpressionAttributeValues: {
+        ':confirmed': 'confirmed', ':active': 'active', ':ref': ref, ':name': name, ':email': email, ':now': now,
+        ...(verifiedHash ? { ':otp': verifiedHash } : {}),
+      },
     }));
   } catch (e) {
     if (!isConditionFailure(e)) throw e;
@@ -144,10 +148,13 @@ export async function handler(event: APIGatewayProxyEventV2) {
           variantId: hold.variantId,
           qty: hold.qty,
           verification: drop.verification,
+          codeSent: Boolean(hold.otpHash),
         });
       }
-      case 'POST /api/holds/{holdId}/otp':
-        throw new ApiError('NOT_IMPLEMENTED', 'Email verification is not available yet');
+      case 'POST /api/holds/{holdId}/otp': {
+        const body = parseBody<{ email?: unknown }>(event.body, event.isBase64Encoded);
+        return json(200, await sendCode(drop, hold, body.email, await emailKey(), now));
+      }
       case 'POST /api/holds/{holdId}/confirm':
         return json(200, await confirm(drop, hold, parseBody(event.body, event.isBase64Encoded), now));
       default:

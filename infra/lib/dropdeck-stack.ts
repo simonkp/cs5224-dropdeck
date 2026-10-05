@@ -43,6 +43,13 @@ export interface DropDeckStackProps extends StackProps {
   webOrigins: string[];
   /** Late ticket numbers reserved per counter write; the fairness experiment varies it. */
   ticketBlockSize?: number;
+  /**
+   * Sender for email codes, e.g. "DropDeck <codes@dropdeck.example>", verified in SES. Unset means log mode: no
+   * email is sent and the code is shown to the page, which only non-prod stages may use.
+   */
+  mailFrom?: string;
+  /** Use Resend as the fallback sender; the key lives in SSM at /dropdeck/<stage>/resend-api-key. */
+  resendFallback?: boolean;
 }
 
 /**
@@ -194,7 +201,24 @@ export class DropDeckStack extends Stack {
     }
     emailHashKey.grantRead(checkoutFn);
     checkoutFn.addEnvironment('EMAIL_HASH_KEY_PARAM', emailHashKey.parameterName);
-    checkoutFn.addToRolePolicy(new PolicyStatement({ actions: ['ses:SendEmail'], resources: ['*'] }));
+    // Email codes (decision 0002).
+    if (props.mailFrom) {
+      const domain = props.mailFrom.replace(/^.*<|>$/g, '').split('@')[1];
+      checkoutFn.addEnvironment('MAIL_MODE', 'ses');
+      checkoutFn.addEnvironment('MAIL_FROM', props.mailFrom);
+      checkoutFn.addToRolePolicy(new PolicyStatement({
+        actions: ['ses:SendEmail'],
+        resources: [`arn:aws:ses:${this.region}:${this.account}:identity/${domain}`, `arn:aws:ses:${this.region}:${this.account}:identity/*@${domain}`],
+      }));
+      if (props.resendFallback) {
+        const resendKey = StringParameter.fromSecureStringParameterAttributes(this, 'ResendKey', { parameterName: `/dropdeck/${stage}/resend-api-key` });
+        resendKey.grantRead(checkoutFn);
+        checkoutFn.addEnvironment('RESEND_KEY_PARAM', resendKey.parameterName);
+      }
+    } else {
+      if (stage === 'prod') throw new Error('prod needs mailFrom: log mode shows email codes to the page');
+      checkoutFn.addEnvironment('MAIL_MODE', 'log');
+    }
 
     const schedulerRole = new Role(this, 'SchedulerRole', { assumedBy: new ServicePrincipal('scheduler.amazonaws.com') });
     controllerFn.grantInvoke(schedulerRole);
@@ -248,7 +272,7 @@ export class DropDeckStack extends Stack {
     const webOut = path.join(repoRoot, 'apps/web/out');
     const runtimeConfig = Source.jsonData('config.json', {
       apiUrl: api.apiEndpoint, userPoolId: userPool.userPoolId, userPoolClientId: userPoolClient.userPoolClientId,
-      authDomain: userPoolDomain.baseUrl(), stage,
+      authDomain: userPoolDomain.baseUrl(), stage, mailMode: props.mailFrom ? 'ses' : 'log',
     });
     new BucketDeployment(this, 'DeployWeb', {
       destinationBucket: bucket,
@@ -263,7 +287,8 @@ export class DropDeckStack extends Stack {
     // i.e. US$5 and US$10 with the default budgetUsd of 10.
     if (props.budgetEmail) {
       new CfnBudget(this, 'Budget', {
-        budget: { budgetName: `dropdeck-${stage}`, budgetType: 'COST', timeUnit: 'MONTHLY', budgetLimit: { amount: props.budgetUsd, unit: 'USD' } },
+        // The amount is in the name: changing it replaces the budget, and a fixed name would collide with the old one.
+        budget: { budgetName: `dropdeck-${stage}-${props.budgetUsd}usd`, budgetType: 'COST', timeUnit: 'MONTHLY', budgetLimit: { amount: props.budgetUsd, unit: 'USD' } },
         notificationsWithSubscribers: [50, 100].map((threshold) => ({
           notification: { notificationType: 'ACTUAL', comparisonOperator: 'GREATER_THAN', threshold, thresholdType: 'PERCENTAGE' },
           subscribers: [{ subscriptionType: 'EMAIL', address: props.budgetEmail }],

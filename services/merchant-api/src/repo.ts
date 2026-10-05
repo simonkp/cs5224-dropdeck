@@ -2,7 +2,7 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
   BatchWriteCommand, DeleteCommand, DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
-import { ApiError, keys, type Drop, type DropState, type MerchantProfile } from '@dropdeck/shared';
+import { ApiError, keys, type Drop, type DropState, type MerchantProfile, type Order, type OrderStatus } from '@dropdeck/shared';
 import { env } from './env.js';
 import { shardCapacities } from './validate.js';
 
@@ -116,4 +116,46 @@ export async function writeStockShards(drop: Drop): Promise<void> {
     }
     if (batch?.length) throw new Error('Could not write all stock shards');
   }
+}
+
+export async function listOrders(t: string, d: string): Promise<Order[]> {
+  const k = keys.orderPrefix(t, d);
+  const out: Order[] = [];
+  let start: Record<string, unknown> | undefined;
+  do {
+    const r = await ddb.send(new QueryCommand({
+      TableName: env.table(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
+      ExpressionAttributeValues: { ':pk': k.PK, ':sk': k.SKPrefix },
+      ExclusiveStartKey: start,
+    }));
+    out.push(...(r.Items ?? []).map((i) => strip<Order>(i)!));
+    start = r.LastEvaluatedKey;
+  } while (start);
+  return out.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+/** Merchant reconciliation: confirmed (awaiting payment), paid, or no-show. */
+export async function setOrderStatus(t: string, d: string, ref: string, status: OrderStatus): Promise<Order> {
+  try {
+    const r = await ddb.send(new UpdateCommand({
+      TableName: env.table(),
+      Key: keys.order(t, d, ref),
+      UpdateExpression: 'SET #s = :s, statusUpdatedAt = :now',
+      ConditionExpression: 'attribute_exists(PK)',
+      ExpressionAttributeNames: { '#s': 'status' },
+      ExpressionAttributeValues: { ':s': status, ':now': new Date().toISOString() },
+      ReturnValues: 'ALL_NEW',
+    }));
+    return strip<Order>(r.Attributes)!;
+  } catch (e) {
+    if (isConditionFailure(e)) throw new ApiError('NOT_FOUND', 'Order not found');
+    throw e;
+  }
+}
+
+/** Queue size: the frozen early group, and the late ticket counter (block-allocated, so an upper bound). */
+export async function queueCounts(drop: Drop): Promise<{ earlyCount: number | null; lateTickets: number }> {
+  const r = await ddb.send(new GetCommand({ TableName: env.table(), Key: keys.ticketCounter(drop.tenantId, drop.dropId) }));
+  return { earlyCount: drop.earlyCount ?? null, lateTickets: Number(r.Item?.v ?? 0) };
 }

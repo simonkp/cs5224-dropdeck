@@ -101,6 +101,13 @@ export interface Hold {
   orderRef?: string;
   name?: string;
   email?: string;
+  /** Email code (decision 0002): keyed hash of the current code, the normalised address it went to, limits. */
+  otpHash?: string;
+  otpEmail?: string;
+  otpExpiresAt?: number;
+  otpSends?: number;
+  otpLastSentAt?: number;
+  otpAttempts?: number;
 }
 
 export interface Order {

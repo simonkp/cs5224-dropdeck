@@ -106,6 +106,14 @@ describe.skipIf(!enabled)('buyer path against DynamoDB Local', () => {
       expect(r.retryAfter).toBeGreaterThan(30);
     });
 
+    it('a buyer arriving after their number came up still gets the full claim window', async () => {
+      // Admission started 9 minutes ago at 80/min, so ticket n is "due" long before anyone arrives to take it.
+      const drop = await liveDrop({ startedMinAgo: 9, holdSec: 60, admitWindowSec: 60 });
+      const tk = parse(await ticket(http.ticket(drop)));
+      expect(tk.n).toBe(0);
+      expect(parse(await claim(http.claim(drop, tk.ticket))).status).toBe(201);
+    });
+
     it('a late ticket is not admitted before its turn', async () => {
       const drop = await liveDrop({ startedMinAgo: 0, ratePreset: 'gentle', holdSec: 900 }); // 20 units / 15 min
       for (let i = 0; i < 3; i++) await ticket(http.ticket(drop));

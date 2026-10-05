@@ -6,6 +6,8 @@ export interface RuntimeConfig {
   /** Cognito managed-login base URL, e.g. https://dropdeck-dev-x.auth.ap-southeast-1.amazoncognito.com */
   authDomain: string;
   stage: string;
+  /** 'log' until a sender is verified in SES: buyers see their email code on screen instead of by email. */
+  mailMode?: 'ses' | 'log';
 }
 
 let pending: Promise<RuntimeConfig> | undefined;

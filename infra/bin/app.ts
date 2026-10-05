@@ -22,6 +22,8 @@ const stack = new DropDeckStack(app, `DropDeck-${stage}`, {
   budgetEmail: String(app.node.tryGetContext('budgetEmail') ?? ''),
   webOrigins: (app.node.tryGetContext('webOrigins') as string[] | undefined) ?? [],
   ticketBlockSize: Number(app.node.tryGetContext('ticketBlockSize') ?? 10),
+  mailFrom: String(app.node.tryGetContext('mailFrom') ?? '') || undefined,
+  resendFallback: String(app.node.tryGetContext('resendFallback') ?? '') === 'true',
 });
 Tags.of(stack).add('Project', 'DropDeck');
 Tags.of(stack).add('Stage', stage);

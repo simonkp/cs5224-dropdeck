@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   admissionRatePerMin, admittedAt, admittedCount, checkAdmission, watermark,
   normaliseEmail, emailHash, sign, verifyHold, verifyTicket, ticketId, canTransition, isLockedForEdit, ApiError,
-  dropAdmissionRate,
+  dropAdmissionRate, claimWindowStart,
 } from '../src/index.js';
 
 describe('email normalisation', () => {
@@ -71,6 +71,10 @@ describe('admission', () => {
     const n = 25;
     const atN = admittedAt({ n }, start, rate, early);
     expect(watermark(admittedCount(start, rate, atN), early).nWatermark).toBeGreaterThanOrEqual(n);
+  });
+  it('starts a late arrival’s window when the ticket was issued', () => {
+    expect(claimWindowStart(1000, 50_000)).toBe(50_000);
+    expect(claimWindowStart(80_000, 50_000)).toBe(80_000);
   });
   it('enforces the admission window', () => {
     expect(checkAdmission(1000, 60, 500)).toMatchObject({ ok: false, reason: 'NOT_ADMITTED' });

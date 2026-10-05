@@ -47,6 +47,15 @@ export function admittedAt(
   return startMs + Math.ceil((position / ratePerMin) * 60_000);
 }
 
+/**
+ * When a ticket's claim window starts: its admission time, or its (signed) issue time if later. When buyers arrive
+ * more slowly than the admission rate, a newcomer's number has already come up; without this they would be
+ * refused as expired the moment they joined (found on the first seeded Live drop).
+ */
+export function claimWindowStart(admittedAtMs: number, issuedAtMs: number): number {
+  return Math.max(admittedAtMs, issuedAtMs);
+}
+
 export type AdmissionCheck = { ok: true } | { ok: false; reason: 'NOT_ADMITTED' | 'ADMISSION_EXPIRED'; retryAfterSec?: number };
 
 export function checkAdmission(admitAtMs: number, admitWindowSec: number, nowMs: number): AdmissionCheck {

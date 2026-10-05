@@ -81,3 +81,19 @@ describe('merchant sign-in and signing keys', () => {
     expect(synth('dev-simon')).toContain('http://localhost:3000/m/callback/');
   });
 });
+
+describe('email codes', () => {
+  const synth = (stage: string, mailFrom?: string) => Template.fromStack(new DropDeckStack(new App(), 'M', {
+    env: { account: '123456789012', region: 'ap-southeast-1' }, stage, budgetUsd: 10, budgetEmail: '', webOrigins: [], mailFrom,
+  }));
+  it('runs in log mode without a sender, and never on prod', () => {
+    expect(JSON.stringify(synth('dev-x').toJSON())).toContain('"MAIL_MODE":"log"');
+    expect(() => synth('prod')).toThrow(/mailFrom/);
+  });
+  it('scopes SES sending to the sender domain', () => {
+    const json = JSON.stringify(synth('staging', 'DropDeck <codes@drop.example>').toJSON());
+    expect(json).toContain('"MAIL_MODE":"ses"');
+    expect(json).toContain('identity/drop.example');
+    expect(json).not.toMatch(/"Action":"ses:SendEmail","Effect":"Allow","Resource":"\*"/);
+  });
+});

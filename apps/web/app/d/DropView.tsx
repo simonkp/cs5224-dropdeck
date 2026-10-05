@@ -299,25 +299,42 @@ function Held(props: {
   onStartOver: () => void;
 }) {
   const { session, drop, serverNow } = props;
+  const needsCode = drop.verification === 'email';
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
+  const [sent, setSent] = useState<{ to: string; at: number; resendAfterSec: number; devCode?: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const left = Date.parse(session.expiresAt) - serverNow;
   const variant = drop.variants.find((v) => v.id === session.variantId);
+  const holdPath = `/api/holds/${encodeURIComponent(session.holdId)}`;
+  const resendIn = sent ? Math.ceil((sent.at + sent.resendAfterSec * 1000 - Date.now()) / 1000) : 0;
 
-  const confirm = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const run = async (fn: () => Promise<void>) => {
     setBusy(true);
     setNotice(null);
     try {
-      const c = await buyerApi<Confirmation>(`/api/holds/${encodeURIComponent(session.holdId)}/confirm`, { token: session.hold, body: { name, email } });
-      props.setSession({ stage: 'confirmed', confirmation: c });
+      await fn();
     } catch (err) {
       setNotice(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
+  };
+
+  const sendCode = () => run(async () => {
+    const r = await buyerApi<{ sentTo: string; resendAfterSec: number; devCode?: string }>(`${holdPath}/otp`, { token: session.hold, body: { email } });
+    setSent({ to: r.sentTo, at: Date.now(), resendAfterSec: r.resendAfterSec, devCode: r.devCode });
+  });
+
+  const confirm = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (needsCode && !sent) return void sendCode();
+    return void run(async () => {
+      const c = await buyerApi<Confirmation>(`${holdPath}/confirm`, { token: session.hold, body: { name, email, ...(needsCode ? { code } : {}) } });
+      props.setSession({ stage: 'confirmed', confirmation: c });
+    });
   };
 
   if (left <= 0) {
@@ -333,10 +350,28 @@ function Held(props: {
       <div className="muted">Reserved for you · {fmtShort(left)} left to check out</div>
       <p><strong>{session.qty} × {variant?.name}</strong> · {variant ? price(variant.priceCents * session.qty) : ''}</p>
       <label>Name<input required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" /></label>
-      <label>Email<input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" /></label>
+      <label>
+        Email
+        <input required type="email" value={email} readOnly={Boolean(sent)} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
+      </label>
       <small className="muted">One order per email for this drop. The merchant uses it to contact you about collection.</small>
+      {needsCode && sent && (
+        <>
+          <p className="muted">We sent a 6-digit code to {sent.to}.</p>
+          {sent.devCode && <p className="notice">Test mode, no email sent: your code is <strong>{sent.devCode}</strong></p>}
+          <label>
+            Code
+            <input required inputMode="numeric" autoComplete="one-time-code" pattern="[0-9 ]{6,7}" maxLength={7} value={code} onChange={(e) => setCode(e.target.value)} />
+          </label>
+        </>
+      )}
       <div className="actions">
-        <button disabled={busy}>{busy ? 'Confirming…' : 'Confirm order'}</button>
+        <button disabled={busy}>{busy ? 'Please wait…' : needsCode && !sent ? 'Send code' : 'Confirm order'}</button>
+        {needsCode && sent && (
+          <button type="button" className="ghost" disabled={busy || resendIn > 0} onClick={() => void sendCode()}>
+            {resendIn > 0 ? `Resend in ${resendIn}s` : 'Resend code'}
+          </button>
+        )}
       </div>
       {notice && <p className="error">{notice}</p>}
     </form>

@@ -231,7 +231,7 @@ async function load(st: Stack, tenant: string) {
   const live = baseDrop(tenant, {
     title: 'Midweek baguettes', description: 'Classic baguettes, 2 per buyer.', state: 'Live', version: 3,
     variants: [{ id: 'v1', name: 'Baguette', stock: 50, priceCents: 450 }, { id: 'v2', name: 'Demi-baguette', stock: 30, priceCents: 300 }],
-    openAt: new Date(now - 3 * MIN).toISOString(), endAt: new Date(now + 45 * MIN).toISOString(), earlyCount: 40, ratePreset: 'fast',
+    openAt: new Date(now - 3 * MIN).toISOString(), endAt: new Date(now + 45 * MIN).toISOString(), earlyCount: 40, ratePreset: 'fast', verification: 'email',
   });
   const liveOrders = await dropWithOrders(st, live, Array.from({ length: 14 }, (_, i) => ({
     variant: live.variants[i % 3 === 2 ? 1 : 0]!, qty: 1 + (i % 2), status: statusMix(i, false),

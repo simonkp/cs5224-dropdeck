@@ -1,12 +1,13 @@
 'use client';
 
 // Types only from @dropdeck/shared: its index also pulls in node:crypto, which must stay out of the browser bundle.
-import type { Drop, MerchantProfile, RatePreset, VerificationMode } from '@dropdeck/shared';
+import type { Drop, MerchantProfile, Order, OrderStatus, RatePreset, VerificationMode } from '@dropdeck/shared';
 import { useCallback, useEffect, useState } from 'react';
-import { api, ApiRequestError } from '../../lib/api';
+import { api, ApiRequestError, apiText } from '../../lib/api';
 import { clearSession, getAccessToken, signedInEmail, signIn, signOut } from '../../lib/auth';
+import { loadConfig } from '../../lib/config';
 
-type View = { kind: 'list' } | { kind: 'profile' } | { kind: 'edit'; drop?: Drop };
+type View = { kind: 'list' } | { kind: 'profile' } | { kind: 'edit'; drop?: Drop } | { kind: 'orders'; drop: Drop };
 
 const price = (cents: number) => `S$${(cents / 100).toFixed(2)}`;
 const when = (iso: string) =>
@@ -93,8 +94,16 @@ function SignedIn() {
         <ProfileForm profile={profile} onSaved={done} onCancel={profile ? () => setView({ kind: 'list' }) : undefined} onError={handle} />
       )}
       {view.kind === 'edit' && <DropEditor drop={view.drop} onSaved={done} onCancel={() => setView({ kind: 'list' })} onError={handle} />}
+      {view.kind === 'orders' && <OrdersView drop={view.drop} onBack={done} onError={handle} />}
       {view.kind === 'list' && (
-        <DropList drops={drops} onEdit={(drop) => setView({ kind: 'edit', drop })} onNew={() => setView({ kind: 'edit' })} onChanged={done} onError={handle} />
+        <DropList
+          drops={drops}
+          onEdit={(drop) => setView({ kind: 'edit', drop })}
+          onOrders={(drop) => setView({ kind: 'orders', drop })}
+          onNew={() => setView({ kind: 'edit' })}
+          onChanged={done}
+          onError={handle}
+        />
       )}
     </main>
   );
@@ -146,6 +155,7 @@ function ProfileForm(props: { profile: MerchantProfile | null; onSaved: () => vo
 function DropList(props: {
   drops: Drop[] | null;
   onEdit: (d: Drop) => void;
+  onOrders: (d: Drop) => void;
   onNew: () => void;
   onChanged: () => void;
   onError: (e: unknown) => void;
@@ -190,6 +200,9 @@ function DropList(props: {
               {d.state !== 'Draft' && <a className="button ghost" href={dropUrl(d)} target="_blank" rel="noreferrer">Open page</a>}
               {d.state !== 'Draft' && (
                 <button className="ghost" onClick={() => void navigator.clipboard.writeText(new URL(dropUrl(d), window.location.origin).toString())}>Copy link</button>
+              )}
+              {(d.state === 'Live' || d.state === 'Closed' || d.state === 'Cancelled') && (
+                <button onClick={() => props.onOrders(d)}>{d.state === 'Live' ? 'Live view & orders' : 'Orders & report'}</button>
               )}
               {editable && <button className="ghost" onClick={() => props.onEdit(d)}>Edit</button>}
               {d.state === 'Draft' && <button disabled={busy === d.dropId} onClick={() => void act(d, 'schedule')}>Schedule</button>}
@@ -239,6 +252,8 @@ function DropEditor(props: { drop?: Drop; onSaved: () => void; onCancel: () => v
   const [ratePreset, setRatePreset] = useState<RatePreset>(d?.ratePreset ?? 'normal');
   const [entryWindowMin, setEntryWindowMin] = useState(String(d?.entryWindowMin ?? 15));
   const [busy, setBusy] = useState(false);
+  const [testMail, setTestMail] = useState(false);
+  useEffect(() => { loadConfig().then((c) => setTestMail(c.mailMode !== 'ses')).catch(() => undefined); }, []);
 
   const setVariant = (i: number, patch: Partial<VariantRow>) => setVariants((vs) => vs.map((v, j) => (j === i ? { ...v, ...patch } : v)));
 
@@ -320,7 +335,7 @@ function DropEditor(props: { drop?: Drop; onSaved: () => void; onCancel: () => v
             <option value="email">Email code at checkout</option>
             <option value="off">None</option>
           </select>
-          {verification === 'email' && <small className="muted">Email codes are not live yet: choose None to test checkout.</small>}
+          {verification === 'email' && testMail && <small className="muted">Test mode: no email is sent yet; buyers see their code on screen.</small>}
         </label>
         <label>
           Admission pace
@@ -337,5 +352,145 @@ function DropEditor(props: { drop?: Drop; onSaved: () => void; onCancel: () => v
         <button type="button" className="ghost" onClick={props.onCancel}>Cancel</button>
       </div>
     </form>
+  );
+}
+
+interface Live {
+  state: Drop['state'];
+  variants: Array<{ id: string; name: string; stock: number; out: number }>;
+  activeHolds: number;
+  orders: number;
+  unitsOrdered: number;
+  queue: { earlyCount: number | null; lateTickets: number };
+}
+
+interface Report {
+  stock: number;
+  orders: number;
+  units: { ordered: number; paid: number; unpaid: number; noShow: number };
+  revenueCents: { ordered: number; paid: number; outstanding: number };
+  sellThrough: number;
+  secondsToSellOut: number | null;
+  byVariant: Array<{ id: string; name: string; stock: number; ordered: number; paid: number }>;
+}
+
+const STATUS_LABEL: Record<OrderStatus, string> = { confirmed: 'Awaiting payment', paid: 'Paid', 'no-show': 'No-show' };
+
+/** Live numbers while the drop runs; reconciliation (paid / no-show), report and CSV afterwards. */
+function OrdersView(props: { drop: Drop; onBack: () => void; onError: (e: unknown) => void }) {
+  const { drop, onError } = props;
+  const [orders, setOrders] = useState<Order[] | null>(null);
+  const [report, setReport] = useState<Report | null>(null);
+  const [live, setLive] = useState<Live | null>(null);
+  const [saving, setSaving] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const [o, r, l] = await Promise.all([
+        api<Order[]>(`/m/drops/${drop.dropId}/orders`),
+        api<Report>(`/m/drops/${drop.dropId}/report`),
+        drop.state === 'Live' ? api<Live>(`/m/drops/${drop.dropId}/live`) : Promise.resolve(null),
+      ]);
+      setOrders(o);
+      setReport(r);
+      setLive(l);
+    } catch (e) {
+      onError(e);
+    }
+  }, [drop, onError]);
+
+  useEffect(() => {
+    void load();
+    if (drop.state !== 'Live') return;
+    const id = setInterval(() => void load(), 5000);
+    return () => clearInterval(id);
+  }, [drop.state, load]);
+
+  const setStatus = async (o: Order, status: OrderStatus) => {
+    setSaving(o.ref);
+    try {
+      const updated = await api<Order>(`/m/orders/${o.ref}`, { method: 'PATCH', body: { dropId: drop.dropId, status } });
+      setOrders((os) => os?.map((x) => (x.ref === o.ref ? updated : x)) ?? null);
+      setReport(await api<Report>(`/m/drops/${drop.dropId}/report`));
+    } catch (e) {
+      onError(e);
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const download = async () => {
+    try {
+      const csv = await apiText(`/m/drops/${drop.dropId}/export.csv`);
+      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${drop.title.replace(/[^\w-]+/g, '-').toLowerCase()}-orders.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      onError(e);
+    }
+  };
+
+  return (
+    <section>
+      <div className="bar">
+        <h2>{drop.title} <span className={`badge ${drop.state.toLowerCase()}`}>{drop.state}</span></h2>
+        <nav>
+          <button className="ghost" onClick={download} disabled={!orders?.length}>Download CSV</button>
+          <button className="ghost" onClick={props.onBack}>Back</button>
+        </nav>
+      </div>
+
+      {live && (
+        <div className="stats">
+          {live.variants.map((v) => (
+            <div key={v.id} className="stat"><span className="muted">{v.name}</span><strong>{v.out} / {v.stock}</strong><small className="muted">held or sold</small></div>
+          ))}
+          <div className="stat"><span className="muted">Holds open</span><strong>{live.activeHolds}</strong><small className="muted">buyers checking out</small></div>
+          <div className="stat"><span className="muted">In the queue</span><strong>{(live.queue.earlyCount ?? 0) + live.queue.lateTickets}</strong><small className="muted">approximate</small></div>
+        </div>
+      )}
+
+      {report && (
+        <div className="stats">
+          <div className="stat"><span className="muted">Orders</span><strong>{report.orders}</strong><small className="muted">{report.units.ordered} of {report.stock} units ({Math.round(report.sellThrough * 100)}%)</small></div>
+          <div className="stat"><span className="muted">Paid</span><strong>{price(report.revenueCents.paid)}</strong><small className="muted">{report.units.paid} units</small></div>
+          <div className="stat"><span className="muted">Awaiting payment</span><strong>{price(report.revenueCents.outstanding)}</strong><small className="muted">{report.units.unpaid} units</small></div>
+          <div className="stat"><span className="muted">No-shows</span><strong>{report.units.noShow}</strong><small className="muted">units</small></div>
+          {report.secondsToSellOut !== null && (
+            <div className="stat"><span className="muted">Sold out in</span><strong>{Math.floor(report.secondsToSellOut / 60)}m {report.secondsToSellOut % 60}s</strong><small className="muted">from opening</small></div>
+          )}
+        </div>
+      )}
+
+      {!orders && <p className="muted">Loading orders…</p>}
+      {orders && orders.length === 0 && <p className="muted">No orders yet.</p>}
+      {orders && orders.length > 0 && (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Ref</th><th>Buyer</th><th>Item</th><th className="num">Amount</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              {orders.map((o) => (
+                <tr key={o.ref}>
+                  <td><code>{o.ref}</code></td>
+                  <td>{o.name}<br /><small className="muted">{o.email}</small></td>
+                  <td>{o.qty} × {o.variantName}</td>
+                  <td className="num">{price(o.amountCents)}</td>
+                  <td>
+                    <select value={o.status} disabled={saving === o.ref} onChange={(e) => void setStatus(o, e.target.value as OrderStatus)} aria-label={`Status of ${o.ref}`}>
+                      {(Object.keys(STATUS_LABEL) as OrderStatus[]).map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+                    </select>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }

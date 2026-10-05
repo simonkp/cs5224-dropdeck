@@ -6,6 +6,8 @@ import {
 } from '@dropdeck/shared';
 import * as repo from './repo.js';
 import * as pub from './publish.js';
+import { buildReport, ordersCsv } from './reports.js';
+import { activeHoldCount, unitsSold } from '@dropdeck/shared/ddb';
 import { assertSchedulable, DEFAULTS, validateDropInput } from './validate.js';
 
 type Event = APIGatewayProxyEventV2WithJWTAuthorizer;
@@ -155,13 +157,47 @@ export async function handler(event: Event) {
         return json(201, copy);
       }
 
-      // Week 3 (enhance and harden): live view, orders, export, report.
-      case 'GET /m/drops/{dropId}/live':
+      case 'GET /m/drops/{dropId}/live': {
+        // While Live, units out (held or confirmed) come from the stock counters; orders are the confirmed part.
+        const drop = await repo.getDrop(t, d!);
+        const [sold, holds, orders, queue] = await Promise.all([unitsSold(drop), activeHoldCount(drop), repo.listOrders(t, d!), repo.queueCounts(drop)]);
+        return json(200, {
+          state: drop.state,
+          variants: drop.variants.map((v) => ({ id: v.id, name: v.name, stock: v.stock, out: sold[v.id] ?? 0 })),
+          activeHolds: holds,
+          orders: orders.length,
+          unitsOrdered: orders.reduce((n, o) => n + o.qty, 0),
+          queue,
+        });
+      }
+
       case 'GET /m/drops/{dropId}/orders':
-      case 'PATCH /m/orders/{ref}':
-      case 'GET /m/drops/{dropId}/export.csv':
-      case 'GET /m/drops/{dropId}/report':
-        throw new ApiError('NOT_IMPLEMENTED', `${event.routeKey} is planned for week 3`);
+        await repo.getDrop(t, d!); // tenant check: a drop that is not yours is NOT_FOUND
+        return json(200, await repo.listOrders(t, d!));
+
+      case 'PATCH /m/orders/{ref}': {
+        const b = body();
+        const status = b.status;
+        if (status !== 'paid' && status !== 'no-show' && status !== 'confirmed') throw new ApiError('VALIDATION', 'status must be paid, no-show or confirmed');
+        if (typeof b.dropId !== 'string') throw new ApiError('VALIDATION', 'dropId is required');
+        return json(200, await repo.setOrderStatus(t, b.dropId, event.pathParameters!.ref!, status));
+      }
+
+      case 'GET /m/drops/{dropId}/export.csv': {
+        const drop = await repo.getDrop(t, d!);
+        const name = drop.title.replace(/[^\w-]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || drop.dropId;
+        return {
+          statusCode: 200,
+          headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="${name}-orders.csv"`, 'cache-control': 'no-store' },
+          body: ordersCsv(await repo.listOrders(t, d!)),
+        };
+      }
+
+      case 'GET /m/drops/{dropId}/report': {
+        const drop = await repo.getDrop(t, d!);
+        const [orders, queue] = await Promise.all([repo.listOrders(t, d!), repo.queueCounts(drop)]);
+        return json(200, buildReport(drop, orders, queue));
+      }
 
       default:
         throw new ApiError('NOT_FOUND', `No route ${event.routeKey}`);
