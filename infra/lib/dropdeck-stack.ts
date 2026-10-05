@@ -259,10 +259,12 @@ export class DropDeckStack extends Stack {
     });
 
     // ---- Cost guard ----
+    // No cost filter: it watches the whole account (dev stages included). Alerts at half and all of the limit,
+    // i.e. US$5 and US$10 with the default budgetUsd of 10.
     if (props.budgetEmail) {
       new CfnBudget(this, 'Budget', {
         budget: { budgetName: `dropdeck-${stage}`, budgetType: 'COST', timeUnit: 'MONTHLY', budgetLimit: { amount: props.budgetUsd, unit: 'USD' } },
-        notificationsWithSubscribers: [50, 80, 100].map((threshold) => ({
+        notificationsWithSubscribers: [50, 100].map((threshold) => ({
           notification: { notificationType: 'ACTUAL', comparisonOperator: 'GREATER_THAN', threshold, thresholdType: 'PERCENTAGE' },
           subscribers: [{ subscriptionType: 'EMAIL', address: props.budgetEmail }],
         })),

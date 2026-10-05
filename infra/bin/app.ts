@@ -18,7 +18,7 @@ if (env.account && !allowedAccounts.includes(env.account)) {
 const stack = new DropDeckStack(app, `DropDeck-${stage}`, {
   env,
   stage,
-  budgetUsd: Number(app.node.tryGetContext('budgetUsd') ?? 30),
+  budgetUsd: Number(app.node.tryGetContext('budgetUsd') ?? 10),
   budgetEmail: String(app.node.tryGetContext('budgetEmail') ?? ''),
   webOrigins: (app.node.tryGetContext('webOrigins') as string[] | undefined) ?? [],
   ticketBlockSize: Number(app.node.tryGetContext('ticketBlockSize') ?? 10),
