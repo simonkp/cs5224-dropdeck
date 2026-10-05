@@ -12,6 +12,13 @@ export function canTransition(from: DropState, to: DropState): boolean {
   return transitions[from].includes(to);
 }
 
+/**
+ * EventBridge Scheduler fires one-time schedules up to a minute late (measured on dev-simon: 0 s and 47 s for two
+ * schedules set to the same second). The open is therefore scheduled this far ahead of the entry window, and the
+ * ticket endpoint refuses tickets until entryOpensAt itself, so the queue opens exactly when the page says.
+ */
+export const OPEN_LEAD_MS = 60_000;
+
 export function entryOpensAt(drop: Pick<Drop, 'openAt' | 'entryWindowMin'>): Date {
   return new Date(Date.parse(drop.openAt) - drop.entryWindowMin * 60_000);
 }

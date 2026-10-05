@@ -93,7 +93,8 @@ export function validateDropInput(body: Record<string, unknown>, partial = false
 /** Extra checks applied when a merchant schedules a drop. */
 export function assertSchedulable(drop: Drop, now: Date): void {
   const entry = Date.parse(drop.openAt) - drop.entryWindowMin * 60_000;
-  if (entry - now.getTime() < 60_000) fail('openAt must leave at least one minute before the entry window opens');
+  // The open fires OPEN_LEAD_MS (1 min) before the entry window and must still be in the future, with a minute's slack.
+  if (entry - now.getTime() < 120_000) fail('openAt must leave at least two minutes before the entry window opens');
   if (drop.variants.reduce((n, v) => n + v.stock, 0) < 1) fail('a drop needs stock to schedule');
 }
 

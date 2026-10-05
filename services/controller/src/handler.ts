@@ -1,7 +1,8 @@
 import type { Context } from 'aws-lambda';
 import { QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import {
-  admissionStartsAt, admittedCount, dropAdmissionRate, FREEZE_DELAY_MS, keys, watermark, type Drop, type PublicState,
+  admissionStartsAt, admittedCount, dropAdmissionRate, entryOpensAt, FREEZE_DELAY_MS, keys, OPEN_LEAD_MS, watermark,
+  type Drop, type PublicState,
 } from '@dropdeck/shared';
 import { ddb, getDrop, isConditionFailure, table } from '@dropdeck/shared/ddb';
 import { activeHoldCount, closeDrop, soldOutFlags, sweepExpired, unitsSold, voidActiveHolds } from './ops.js';
@@ -45,6 +46,9 @@ async function open(t: string, d: string, controllerArn: string): Promise<boolea
         ExpressionAttributeValues: { ':live': 'Live', ':scheduled': 'Scheduled', ':one': 1, ':now': new Date().toISOString() },
       }));
       drop = { ...drop, state: 'Live' };
+      // Scheduler lag is an evaluation number: how late the open fired against when it was scheduled.
+      const scheduledFor = entryOpensAt(drop).getTime() - OPEN_LEAD_MS;
+      log('opened', { t, d, lagMs: Date.now() - scheduledFor, msBeforeEntry: entryOpensAt(drop).getTime() - Date.now() });
     } catch (e) {
       if (!isConditionFailure(e)) throw e;
       drop = await getDrop(t, d); // another invocation won, or the merchant cancelled
@@ -139,6 +143,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export async function handler(event: ControllerEvent, context: Pick<Context, 'invokedFunctionArn' | 'getRemainingTimeInMillis'>) {
   const { tenantId: t, dropId: d } = event;
+  log('controller invoked', { action: event.action, t, d });
   const deadline = Date.now() + Math.min(RUN_MS, context.getRemainingTimeInMillis() - 10_000);
   if (event.action === 'open' && !(await open(t, d, context.invokedFunctionArn))) return { ok: true, live: false };
 
@@ -157,5 +162,6 @@ export async function handler(event: ControllerEvent, context: Pick<Context, 'in
     if (Date.now() + TICK_MS > deadline) break;
     await sleep(TICK_MS);
   }
+  log('controller done', { action: event.action, t, d, ticks, state: last?.state ?? 'stopped' });
   return { ok: true, ticks, last };
 }

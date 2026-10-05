@@ -98,6 +98,14 @@ describe.skipIf(!enabled)('buyer path against DynamoDB Local', () => {
       expect(publish.writeState).toHaveBeenCalled();
     });
 
+    it('a drop opened early by the scheduler lead refuses tickets until the advertised time', async () => {
+      // Live already (the open fires a minute ahead), but the entry window starts 40 s from now.
+      const drop = await liveDrop({ startedMinAgo: -(40 / 60 + 0.5 + 1), entryWindowMin: 1, earlyCount: undefined });
+      const r = parse(await ticket(http.ticket(drop)));
+      expect(r.code).toBe('NOT_LIVE');
+      expect(r.retryAfter).toBeGreaterThan(30);
+    });
+
     it('a late ticket is not admitted before its turn', async () => {
       const drop = await liveDrop({ startedMinAgo: 0, ratePreset: 'gentle', holdSec: 900 }); // 20 units / 15 min
       for (let i = 0; i < 3; i++) await ticket(http.ticket(drop));

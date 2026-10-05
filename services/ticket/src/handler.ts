@@ -1,7 +1,7 @@
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import { randomBytes, randomInt, randomUUID } from 'node:crypto';
 import { UpdateCommand } from '@aws-sdk/lib-dynamodb';
-import { admissionStartsAt, ApiError, errorResult, json, keys, sign, type TicketClaims } from '@dropdeck/shared';
+import { admissionStartsAt, ApiError, entryOpensAt, errorResult, json, keys, sign, type TicketClaims } from '@dropdeck/shared';
 import { ddb, getDropCached, table } from '@dropdeck/shared/ddb';
 import { ssmSecret } from '@dropdeck/shared/secrets';
 
@@ -64,6 +64,9 @@ export async function handler(event: APIGatewayProxyEventV2) {
       throw new ApiError('NOT_LIVE', drop.state === 'Scheduled' ? 'The queue has not opened yet' : 'This drop is not open');
     }
     if (now > Date.parse(drop.endAt)) throw new ApiError('NOT_LIVE', 'This drop has ended');
+    // The drop goes Live up to a minute early (OPEN_LEAD_MS); nobody joins before the advertised time.
+    const opens = entryOpensAt(drop).getTime();
+    if (now < opens) throw new ApiError('NOT_LIVE', 'The queue has not opened yet', Math.ceil((opens - now) / 1000));
 
     const start = admissionStartsAt(drop);
     const exp = Date.parse(drop.endAt) + drop.holdSec * 1000;

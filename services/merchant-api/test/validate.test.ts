@@ -27,8 +27,8 @@ describe('drop validation', () => {
 
 describe('scheduling', () => {
   const drop = { ...validateDropInput(valid), entryWindowMin: 15, state: 'Draft' } as never;
-  it('requires a minute of lead time before the entry window', () => {
-    expect(() => assertSchedulable(drop, new Date('2026-10-31T00:44:30Z'))).toThrow(/minute/);
+  it('requires two minutes of lead time before the entry window', () => {
+    expect(() => assertSchedulable(drop, new Date('2026-10-31T00:43:30Z'))).toThrow(/minutes/);
     expect(() => assertSchedulable(drop, new Date('2026-10-31T00:40:00Z'))).not.toThrow();
   });
 });

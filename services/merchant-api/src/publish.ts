@@ -4,7 +4,7 @@ import {
   type CreateScheduleCommandInput,
 } from '@aws-sdk/client-scheduler';
 import {
-  entryOpensAt, s3Keys, type Drop, type DropState, type MerchantProfile, type PublicDrop, type PublicState,
+  entryOpensAt, OPEN_LEAD_MS, s3Keys, type Drop, type DropState, type MerchantProfile, type PublicDrop, type PublicState,
 } from '@dropdeck/shared';
 import { env } from './env.js';
 
@@ -66,11 +66,11 @@ export async function deleteStateJson(drop: Drop): Promise<void> {
 const scheduleName = (drop: Drop) => `open-${drop.dropId}`;
 
 /**
- * One-off schedule at the entry-window start; the controller moves the drop to Live.
+ * One-off schedule a minute before the entry window (OPEN_LEAD_MS); the controller moves the drop to Live.
  * Upserts, so a retried /schedule (or one after a failed rollback) does not trip on ConflictException.
  */
 export async function createOpenSchedule(drop: Drop): Promise<void> {
-  const at = entryOpensAt(drop).toISOString().slice(0, 19);
+  const at = new Date(entryOpensAt(drop).getTime() - OPEN_LEAD_MS).toISOString().slice(0, 19);
   const input: CreateScheduleCommandInput = {
     Name: scheduleName(drop),
     GroupName: env.scheduleGroup(),

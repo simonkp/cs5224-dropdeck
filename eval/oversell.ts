@@ -16,8 +16,15 @@ import { CloudFormationClient, DescribeStacksCommand } from '@aws-sdk/client-clo
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { BatchWriteCommand, DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { keys, shardCapacities, type Drop } from '@dropdeck/shared';
+import { Agent, setGlobalDispatcher } from 'undici';
+
+// A shared keep-alive pool: hundreds of simultaneous fetches would otherwise each open a connection (and do a DNS
+// lookup), which a laptop resolver such as WSL's fails under. 64 connections still keep every request in flight.
+setGlobalDispatcher(new Agent({ connections: 64, pipelining: 1, keepAliveTimeout: 30_000 }));
 
 const { values: args } = parseArgs({
+  // pnpm forwards the `--` separator; drop it so `pnpm ... oversell -- --stage x` works.
+  args: process.argv.slice(2).filter((a) => a !== '--'),
   options: {
     stage: { type: 'string' },
     n: { type: 'string', default: '200' },
@@ -48,13 +55,11 @@ async function main() {
   const tableName = out.TableName!;
   const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
-  // fast preset with 1-minute holds admits 4M per minute; start far enough back that ticket N is admitted now,
-  // and stretch the window so ticket 0 has not expired.
+  // fast preset with 1-minute holds admits 4M per minute. Start far enough back that every ticket number is
+  // admitted now, and stretch the claim window so number 0 has not expired. Numbers run past N on real Lambda:
+  // each concurrent instance reserves its own block, so allow 3N (the first deployed run saw numbers beyond N).
   const ratePerMin = 4 * M;
-  const startedMin = Math.ceil(N / ratePerMin) + 1;
-  if (startedMin * 60 + 120 > 600) {
-    throw new Error(`N=${N} needs ${startedMin} min of admission at ${ratePerMin}/min, beyond the 10-minute claim window; raise --m or lower --n`);
-  }
+  const startedMin = Math.ceil((3 * N) / ratePerMin) + 1;
   const now = Date.now();
   const openAt = new Date(now - startedMin * 60_000 - 30_000).toISOString();
   const drop: Drop = {
@@ -76,8 +81,13 @@ async function main() {
 
   const post = async (p: string, body?: unknown) => {
     const t0 = performance.now();
-    const r = await fetch(`${api}${p}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
-    return { status: r.status, body: (await r.json()) as Record<string, unknown>, ms: performance.now() - t0 };
+    try {
+      const r = await fetch(`${api}${p}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+      return { status: r.status, body: (await r.json()) as Record<string, unknown>, ms: performance.now() - t0 };
+    } catch (e) {
+      // Client-side network failure: recorded, and it fails the run's refusal check rather than aborting it.
+      return { status: 0, body: { code: `NETWORK:${(e as { cause?: { code?: string } }).cause?.code ?? 'ERROR'}` }, ms: performance.now() - t0 };
+    }
   };
   const results = await Promise.all(Array.from({ length: N }, async () => {
     const t = await post(`/api/d/${drop.tenantId}/${drop.dropId}/ticket`);
