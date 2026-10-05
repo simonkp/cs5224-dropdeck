@@ -39,6 +39,35 @@ export class GithubOidcStack extends Stack {
       actions: ['sts:AssumeRole', 'sts:TagSession'],
       resources: [`arn:aws:iam::${this.account}:role/cdk-*`],
     }));
+
+    // Fallback for accounts whose SCPs forbid assuming the bootstrap roles (the NUS Innovation Sandbox does).
+    // The CLI then deploys with this role's own credentials but still hands CloudFormation the bootstrap
+    // execution role, so all that is needed here is what the CLI itself does: no IAM or service admin.
+    const q = 'hnb659fds';
+    role.addToPolicy(new PolicyStatement({
+      actions: ['cloudformation:*'],
+      resources: [
+        `arn:aws:cloudformation:${this.region}:${this.account}:stack/DropDeck-*/*`,
+        `arn:aws:cloudformation:${this.region}:${this.account}:stack/CDKToolkit/*`,
+      ],
+    }));
+    role.addToPolicy(new PolicyStatement({
+      actions: ['cloudformation:DescribeStacks', 'cloudformation:ValidateTemplate', 'cloudformation:GetTemplateSummary'],
+      resources: ['*'],
+    }));
+    role.addToPolicy(new PolicyStatement({
+      actions: ['s3:GetObject', 's3:PutObject', 's3:ListBucket', 's3:GetBucketLocation', 's3:GetEncryptionConfiguration'],
+      resources: [`arn:aws:s3:::cdk-${q}-assets-${this.account}-${this.region}`, `arn:aws:s3:::cdk-${q}-assets-${this.account}-${this.region}/*`],
+    }));
+    role.addToPolicy(new PolicyStatement({
+      actions: ['ssm:GetParameter', 'ssm:GetParameters'],
+      resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/cdk-bootstrap/${q}/*`],
+    }));
+    role.addToPolicy(new PolicyStatement({
+      actions: ['iam:PassRole'],
+      resources: [`arn:aws:iam::${this.account}:role/cdk-${q}-cfn-exec-role-${this.account}-${this.region}`],
+      conditions: { StringEquals: { 'iam:PassedToService': 'cloudformation.amazonaws.com' } },
+    }));
     new CfnOutput(this, 'DeployRoleArn', { value: role.roleArn });
   }
 }
