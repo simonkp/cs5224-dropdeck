@@ -7,6 +7,14 @@ const app = new App();
 const stage = String(app.node.tryGetContext('stage') ?? 'dev');
 const env = { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION ?? 'ap-southeast-1' };
 
+// Refuse to synth against an account that isn't ours (e.g. a work profile left as [default]).
+// Accepts the cdk.json array or a comma-separated `-c allowedAccounts=...` for a personal dev account.
+const allowedCtx = (app.node.tryGetContext('allowedAccounts') as string[] | string | undefined) ?? [];
+const allowedAccounts = Array.isArray(allowedCtx) ? allowedCtx : allowedCtx.split(',').map((a) => a.trim());
+if (env.account && !allowedAccounts.includes(env.account)) {
+  throw new Error(`Account ${env.account} is not in cdk.json "allowedAccounts"; check AWS_PROFILE.`);
+}
+
 const stack = new DropDeckStack(app, `DropDeck-${stage}`, {
   env,
   stage,

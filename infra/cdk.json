@@ -5,6 +5,7 @@
     "budgetUsd": 30,
     "budgetEmail": "",
     "githubRepo": "",
+    "allowedAccounts": ["123456789012"],
     "webOrigins": ["http://localhost:3000"]
   }
 }

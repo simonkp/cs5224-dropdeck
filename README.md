@@ -26,10 +26,12 @@ pnpm typecheck && pnpm test
 pnpm web:build             # apps/web/out, uploaded by the CDK stack
 ```
 
-Deploy your own dev stage (personal AWS account, region ap-southeast-1):
+Deploy your own dev stage (personal AWS account, region ap-southeast-1). Always use a named profile:
+synth refuses any account not in `allowedAccounts` (`infra/cdk.json`, or `-c allowedAccounts=<id>`).
 
 ```bash
 cd infra
+export AWS_PROFILE=<your-dropdeck-profile>
 npx cdk bootstrap                         # once per account/region
 npx cdk deploy DropDeck-dev-simon -c stage=dev-simon -c budgetEmail=you@example.com
 npx cdk destroy DropDeck-dev-simon -c stage=dev-simon   # when idle
@@ -37,8 +39,9 @@ npx cdk destroy DropDeck-dev-simon -c stage=dev-simon   # when idle
 ```
 
 Shared account, once: `npx cdk deploy DropDeck-GithubOidc -c githubRepo=<owner>/<repo>`, then add the
-output role ARN as the `AWS_DEPLOY_ROLE_ARN` secret and `BUDGET_EMAIL` as a repository variable.
-Merges to `main` then deploy `staging` and run a smoke test.
+output role ARN as the `AWS_DEPLOY_ROLE_ARN` repository variable and `BUDGET_EMAIL` as another.
+Merges to `main` then deploy `staging` and run a smoke test; until `AWS_DEPLOY_ROLE_ARN` is set the
+deploy job is skipped rather than failing.
 
 ## Guardrails (tested in `infra/test`)
 
