@@ -21,6 +21,8 @@ One page at `/d/index.html` serves every drop. A CloudFront Function rewrites `/
 
 Publishing a drop is a JSON write; no build per drop.
 
+The merchant console (`/m/`) signs in through Cognito managed login with the authorization-code + PKCE flow and sends the access token to the merchant API's JWT authorizer, so the static site carries no auth SDK. The drop page takes its clock offset from the `Date` + `Age` response headers, since a scheduled drop's `state.json` is written once and then cached.
+
 ## Change from the preliminary report
 
 As in the preliminary report; mechanism specified.

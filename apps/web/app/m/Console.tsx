@@ -4,7 +4,7 @@
 import type { Drop, MerchantProfile, RatePreset, VerificationMode } from '@dropdeck/shared';
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiRequestError } from '../../lib/api';
-import { getAccessToken, signedInEmail, signIn, signOut } from '../../lib/auth';
+import { clearSession, getAccessToken, signedInEmail, signIn, signOut } from '../../lib/auth';
 
 type View = { kind: 'list' } | { kind: 'profile' } | { kind: 'edit'; drop?: Drop };
 
@@ -49,6 +49,7 @@ function SignedIn() {
 
   const handle = useCallback((e: unknown) => {
     if (e instanceof ApiRequestError && e.status === 401) {
+      clearSession(); // otherwise a token the API rejects (not just an expired one) reloads forever
       window.location.reload();
       return;
     }

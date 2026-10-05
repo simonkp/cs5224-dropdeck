@@ -118,6 +118,9 @@ export async function getAccessToken(): Promise<string | null> {
 
 export const signedInEmail = () => readSession()?.email;
 
+/** Drop a token the API rejected, so the console falls back to the sign-in screen instead of retrying it. */
+export const clearSession = () => store.remove(SESSION);
+
 export async function signOut(): Promise<void> {
   store.remove(SESSION);
   const cfg = await loadConfig();

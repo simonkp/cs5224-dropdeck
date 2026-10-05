@@ -60,7 +60,9 @@ export default function DropView() {
         if (r.ok) {
           const s = (await r.json()) as PublicState;
           setState(s);
-          setOffset(servedAt(r, s) - Date.now());
+          // The Date header has 1 s resolution; ignore sub-1.5 s wobble so the countdown does not jitter.
+          const next = servedAt(r, s) - Date.now();
+          setOffset((prev) => (Math.abs(next - prev) > 1500 ? next : prev));
         }
       } catch { /* keep the last state */ }
       if (!stop) setTimeout(tick, POLL_MS);
