@@ -40,7 +40,8 @@ async function viaResend(m: Mail): Promise<void> {
 
 export async function sendMail(m: Mail): Promise<void> {
   if (mailMode() === 'log') {
-    console.log(JSON.stringify({ level: 'info', msg: 'mail (log mode, not sent)', to: m.to, subject: m.subject }));
+    // Masked: in a study on a log-mode stage, participants' addresses should not sit in CloudWatch.
+    console.log(JSON.stringify({ level: 'info', msg: 'mail (log mode, not sent)', to: m.to.replace(/^(.)[^@]*(.@)/, '$1•••$2') }));
     return;
   }
   try {
