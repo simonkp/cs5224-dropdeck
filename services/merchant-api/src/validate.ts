@@ -97,9 +97,5 @@ export function assertSchedulable(drop: Drop, now: Date): void {
   if (drop.variants.reduce((n, v) => n + v.stock, 0) < 1) fail('a drop needs stock to schedule');
 }
 
-/** Split each variant's stock across shards; remainders go to the lowest shards. */
-export function shardCapacities(stock: number, shards: number): number[] {
-  const base = Math.floor(stock / shards);
-  const rem = stock % shards;
-  return Array.from({ length: shards }, (_, i) => base + (i < rem ? 1 : 0));
-}
+/** Moved to the shared package: the claim path derives each shard's capacity from the drop config. */
+export { shardCapacities } from '@dropdeck/shared';

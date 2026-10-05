@@ -1,20 +1,141 @@
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
-import { ApiError, errorResult } from '@dropdeck/shared';
+import { randomInt } from 'node:crypto';
+import { DeleteCommand, GetCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import {
+  ApiError, emailHash, errorResult, isPlausibleEmail, json, keys, normaliseEmail, parseBody, verifyHold,
+  type Drop, type Hold, type Order,
+} from '@dropdeck/shared';
+import { ddb, getDropCached, getHold, getProfile, isConditionFailure, releaseHold, strip, table } from '@dropdeck/shared/ddb';
+import { ssmSecret } from '@dropdeck/shared/secrets';
 
 /**
- * GET  /api/holds/{holdId}           resume a hold after refresh
- * POST /api/holds/{holdId}/otp       email → 6-digit code via SES (skipped when verification is off)
- * POST /api/holds/{holdId}/confirm   code + name → order
- * (week 2 basic path; hardened in week 3)
+ * GET  /api/holds/{holdId}           resume a hold (or its confirmation) after a refresh
+ * POST /api/holds/{holdId}/otp       email code: Phase 4 (decision 0002)
+ * POST /api/holds/{holdId}/confirm   { name, email } → order; payment is a PayNow handoff (decision 0004)
  *
- * TODO
- * - verifyHold(); reject HOLD_EXPIRED if state != active or expiresAt passed.
- * - OTP: normaliseEmail(), store sha256(code) + otpExpiresAt + attempts on the hold item;
- *   resend after 30 s, max 3 sends and 5 attempts → OTP_LOCKED.
- * - Confirm: conditional put of the buyer-limit item (attribute_not_exists) → LIMIT_REACHED and
- *   release the hold on failure; then flip hold active→confirmed (conditional) and write the order.
- * - Response: order ref, merchant PayNow details, survey code.
+ * The hold token travels as `Authorization: Bearer <token>`.
  */
-export async function handler(_event: APIGatewayProxyEventV2) {
-  return errorResult(new ApiError('NOT_IMPLEMENTED', 'Checkout is planned for week 2'));
+
+const tokenKey = ssmSecret('TOKEN_KEY_PARAM');
+const emailKey = ssmSecret('EMAIL_HASH_KEY_PARAM');
+
+const REF_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const newRef = () => Array.from({ length: 6 }, () => REF_ALPHABET[randomInt(REF_ALPHABET.length)]).join('');
+
+async function confirmation(drop: Drop, order: Order) {
+  const profile = await getProfile(drop.tenantId);
+  return {
+    state: 'confirmed' as const,
+    orderRef: order.ref,
+    dropTitle: drop.title,
+    variantName: order.variantName,
+    qty: order.qty,
+    amountCents: order.amountCents,
+    merchant: { name: profile?.name ?? 'The merchant', paynow: profile?.paynow, fulfilmentNote: profile?.fulfilmentNote },
+  };
+}
+
+function buildOrder(drop: Drop, hold: Hold, ref: string, name: string, email: string): Order {
+  const variant = drop.variants.find((v) => v.id === hold.variantId);
+  const unit = variant?.priceCents ?? 0;
+  return {
+    tenantId: drop.tenantId, dropId: drop.dropId, ref, holdId: hold.holdId, variantId: hold.variantId,
+    variantName: variant?.name ?? hold.variantId, qty: hold.qty, unitPriceCents: unit, amountCents: unit * hold.qty,
+    name, email, status: 'confirmed', createdAt: new Date(hold.createdAt).toISOString(),
+  };
+}
+
+/** Writes the order if it is missing; a retried confirm after a crash rebuilds it from the confirmed hold. */
+async function ensureOrder(drop: Drop, hold: Hold): Promise<Order> {
+  const k = keys.order(drop.tenantId, drop.dropId, hold.orderRef!);
+  const existing = strip<Order>((await ddb.send(new GetCommand({ TableName: table(), Key: k }))).Item);
+  if (existing) return existing;
+  const order = buildOrder(drop, hold, hold.orderRef!, hold.name ?? '', hold.email ?? '');
+  await ddb.send(new PutCommand({ TableName: table(), Item: { ...k, type: 'Order', ...order } }));
+  return order;
+}
+
+async function confirm(drop: Drop, hold: Hold, body: { name?: unknown; email?: unknown }, now: number) {
+  if (hold.state === 'confirmed') return confirmation(drop, await ensureOrder(drop, hold));
+  if (hold.state !== 'active' || hold.expiresAt <= now) throw new ApiError('HOLD_EXPIRED', 'Your hold has expired');
+  if (drop.verification === 'email') {
+    // Phase 4 adds the email code; until then only drops with verification off can check out.
+    throw new ApiError('NOT_IMPLEMENTED', 'Email verification is not available yet');
+  }
+  const name = typeof body.name === 'string' ? body.name.trim().slice(0, 80) : '';
+  const email = typeof body.email === 'string' ? body.email.trim() : '';
+  if (!name) throw new ApiError('VALIDATION', 'Please enter your name');
+  if (!isPlausibleEmail(email)) throw new ApiError('VALIDATION', 'Please enter a valid email');
+  const limitKey = keys.buyerLimit(drop.tenantId, drop.dropId, emailHash(normaliseEmail(email), await emailKey()));
+
+  // One order per address per drop: a conditional put on its own item (a retry by the same hold passes).
+  try {
+    await ddb.send(new PutCommand({
+      TableName: table(),
+      Item: { ...limitKey, type: 'Limit', holdId: hold.holdId, ttl: Math.floor(Date.parse(drop.endAt) / 1000) + 30 * 86_400 },
+      ConditionExpression: 'attribute_not_exists(PK) OR holdId = :h',
+      ExpressionAttributeValues: { ':h': hold.holdId },
+    }));
+  } catch (e) {
+    if (!isConditionFailure(e)) throw e;
+    await releaseHold(hold);
+    throw new ApiError('LIMIT_REACHED', 'This email already has an order for this drop');
+  }
+
+  const ref = newRef();
+  try {
+    await ddb.send(new UpdateCommand({
+      TableName: table(),
+      Key: keys.hold(drop.tenantId, drop.dropId, hold.holdId),
+      UpdateExpression: 'SET #s = :confirmed, orderRef = :ref, #n = :name, email = :email REMOVE GSI1PK, GSI1SK',
+      ConditionExpression: '#s = :active AND expiresAt > :now',
+      ExpressionAttributeNames: { '#s': 'state', '#n': 'name' },
+      ExpressionAttributeValues: { ':confirmed': 'confirmed', ':active': 'active', ':ref': ref, ':name': name, ':email': email, ':now': now },
+    }));
+  } catch (e) {
+    if (!isConditionFailure(e)) throw e;
+    // Expired or swept between the read and here: free the address for another try.
+    await ddb.send(new DeleteCommand({
+      TableName: table(), Key: limitKey, ConditionExpression: 'holdId = :h', ExpressionAttributeValues: { ':h': hold.holdId },
+    })).catch(() => undefined);
+    throw new ApiError('HOLD_EXPIRED', 'Your hold has expired');
+  }
+  const order = buildOrder(drop, hold, ref, name, email);
+  await ddb.send(new PutCommand({ TableName: table(), Item: { ...keys.order(drop.tenantId, drop.dropId, ref), type: 'Order', ...order } }));
+  console.log(JSON.stringify({ metric: 'order', t: drop.tenantId, d: drop.dropId, ref, holdId: hold.holdId, qty: hold.qty, msFromHold: now - hold.createdAt }));
+  return confirmation(drop, order);
+}
+
+export async function handler(event: APIGatewayProxyEventV2) {
+  try {
+    const holdId = event.pathParameters?.holdId;
+    const token = (event.headers?.authorization ?? '').replace(/^Bearer\s+/i, '');
+    const now = Date.now();
+    const c = verifyHold(token, await tokenKey(), now);
+    if (!holdId || c.h !== holdId) throw new ApiError('BAD_TOKEN', 'Token is for a different hold');
+    const [drop, hold] = await Promise.all([getDropCached(c.t, c.d), getHold(c.t, c.d, c.h)]);
+    if (!hold) throw new ApiError('HOLD_EXPIRED', 'This hold no longer exists');
+
+    switch (event.routeKey) {
+      case 'GET /api/holds/{holdId}': {
+        if (hold.state === 'confirmed') return json(200, await confirmation(drop, await ensureOrder(drop, hold)));
+        const active = hold.state === 'active' && hold.expiresAt > now;
+        return json(200, {
+          state: active ? 'active' : 'expired',
+          expiresAt: new Date(hold.expiresAt).toISOString(),
+          variantId: hold.variantId,
+          qty: hold.qty,
+          verification: drop.verification,
+        });
+      }
+      case 'POST /api/holds/{holdId}/otp':
+        throw new ApiError('NOT_IMPLEMENTED', 'Email verification is not available yet');
+      case 'POST /api/holds/{holdId}/confirm':
+        return json(200, await confirm(drop, hold, parseBody(event.body, event.isBase64Encoded), now));
+      default:
+        throw new ApiError('NOT_FOUND', `No route ${event.routeKey}`);
+    }
+  } catch (err) {
+    return errorResult(err);
+  }
 }

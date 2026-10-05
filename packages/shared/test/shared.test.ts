@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   admissionRatePerMin, admittedAt, admittedCount, checkAdmission, watermark,
-  normaliseEmail, emailHash, sign, verifyTicket, ticketId, canTransition, isLockedForEdit, ApiError,
+  normaliseEmail, emailHash, sign, verifyHold, verifyTicket, ticketId, canTransition, isLockedForEdit, ApiError,
+  dropAdmissionRate,
 } from '../src/index.js';
 
 describe('email normalisation', () => {
@@ -30,6 +31,11 @@ describe('signed tokens', () => {
     const forged = `${Buffer.from(JSON.stringify({ k: 'ticket', t: 't1', d: 'd1', n: 0, iat: 1 })).toString('base64url')}.${mac}`;
     expect(() => verifyTicket(forged, key)).toThrow(ApiError);
   });
+  it('rejects an expired token', () => {
+    const tok = sign({ k: 'hold', t: 't1', d: 'd1', h: 'n1', iat: 1, exp: 1000 }, key);
+    expect(verifyHold(tok, key, 999).h).toBe('n1');
+    expect(() => verifyHold(tok, key, 1001)).toThrow(/expired/);
+  });
   it('rejects a hold token used as a ticket', () => {
     const tok = sign({ k: 'hold', t: 't1', d: 'd1', h: 'n1', iat: 1 }, key);
     expect(() => verifyTicket(tok, key)).toThrow(/ticket/);
@@ -40,6 +46,7 @@ describe('admission', () => {
   const start = Date.parse('2026-10-30T09:00:30Z');
   it('derives the rate from stock, hold window and preset', () => {
     expect(admissionRatePerMin('normal', 200, 300)).toBe(80);
+    expect(dropAdmissionRate({ ratePreset: 'normal', holdSec: 300, variants: [{ id: 'a', name: 'a', stock: 150, priceCents: 1 }, { id: 'b', name: 'b', stock: 50, priceCents: 1 }] })).toBe(80);
     expect(admissionRatePerMin('fast', 200, 300, 50)).toBe(50);
   });
   it('admits the early group before late tickets', () => {

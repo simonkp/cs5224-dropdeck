@@ -41,6 +41,8 @@ export interface DropDeckStackProps extends StackProps {
   budgetUsd: number;
   budgetEmail: string;
   webOrigins: string[];
+  /** Late ticket numbers reserved per counter write; the fairness experiment varies it. */
+  ticketBlockSize?: number;
 }
 
 /**
@@ -173,6 +175,7 @@ export class DropDeckStack extends Stack {
 
     const merchantFn = fn('MerchantApi', 'services/merchant-api/src/handler.ts');
     const ticketFn = fn('Ticket', 'services/ticket/src/handler.ts', { memory: 256 });
+    ticketFn.addEnvironment('BLOCK_SIZE', String(props.ticketBlockSize ?? 10));
     const claimFn = fn('Claim', 'services/claim/src/handler.ts');
     const checkoutFn = fn('Checkout', 'services/checkout/src/handler.ts');
     const controllerFn = fn('Controller', 'services/controller/src/handler.ts', { timeout: 70 });

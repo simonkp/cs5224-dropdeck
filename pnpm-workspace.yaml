@@ -3,6 +3,7 @@ packages:
   - services/*
   - apps/*
   - infra
+  - tests/*
 onlyBuiltDependencies:
   - esbuild
   - sharp

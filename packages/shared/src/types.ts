@@ -81,3 +81,38 @@ export interface PublicState {
   earlyCount: number | null;
   soldOut: Record<string, boolean>;
 }
+
+/** One per ticket (holdId = ticketId), so a retried claim cannot reserve twice. */
+export interface Hold {
+  tenantId: string;
+  dropId: string;
+  holdId: string;
+  variantId: string;
+  qty: number;
+  /** Stock shard the units came from; a release returns them there. */
+  shard: number;
+  state: HoldState;
+  /** Epoch ms. Checked on read and swept by the controller; DynamoDB TTL is only a backstop. */
+  createdAt: number;
+  expiresAt: number;
+  /** Set when the hold is confirmed, so a retried confirm can rebuild the order. */
+  orderRef?: string;
+  name?: string;
+  email?: string;
+}
+
+export interface Order {
+  tenantId: string;
+  dropId: string;
+  ref: string;
+  holdId: string;
+  variantId: string;
+  variantName: string;
+  qty: number;
+  unitPriceCents: number;
+  amountCents: number;
+  name: string;
+  email: string;
+  status: OrderStatus;
+  createdAt: string;
+}

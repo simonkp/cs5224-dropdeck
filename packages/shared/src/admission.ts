@@ -13,6 +13,14 @@ export function admissionRatePerMin(preset: RatePreset, totalStock: number, hold
   return Math.max(1, Math.min(rate, tenantCapPerMin ?? Infinity));
 }
 
+/** The drop's admission rate: its preset applied to total stock per hold window. */
+export function dropAdmissionRate(drop: Pick<Drop, 'ratePreset' | 'variants' | 'holdSec'>): number {
+  return admissionRatePerMin(drop.ratePreset, drop.variants.reduce((n, v) => n + v.stock, 0), drop.holdSec);
+}
+
+/** The controller freezes the early-group size this long after admission starts, so in-flight ticket ADDs land first. */
+export const FREEZE_DELAY_MS = 2000;
+
 export function admissionStartsAt(drop: Pick<Drop, 'openAt' | 'graceSec'>): number {
   return Date.parse(drop.openAt) + drop.graceSec * 1000;
 }

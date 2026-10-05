@@ -30,10 +30,29 @@ jobs:
           CDK_DEFAULT_REGION: ap-southeast-1
         run: npx cdk synth --quiet -c stage=staging
 
+  integration:
+    # Real handlers against DynamoDB Local: oversell, shard sweep, idempotency, buyer limit, controller.
+    runs-on: ubuntu-latest
+    services:
+      dynamodb:
+        image: amazon/dynamodb-local
+        ports: ['8000:8000']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @dropdeck/integration-tests test
+        env:
+          DYNAMODB_LOCAL: http://localhost:8000
+
   deploy-staging:
     # Skipped (not failed) until the OIDC stack is deployed and AWS_DEPLOY_ROLE_ARN is set as a repo variable.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AWS_DEPLOY_ROLE_ARN != ''
-    needs: check
+    needs: [check, integration]
     runs-on: ubuntu-latest
     environment: staging
     permissions:

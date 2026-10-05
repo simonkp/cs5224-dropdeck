@@ -6,3 +6,4 @@ export * from './email.js';
 export * from './lifecycle.js';
 export * from './admission.js';
 export * from './http.js';
+export * from './stock.js';

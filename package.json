@@ -2,12 +2,15 @@
   "name": "dropdeck",
   "private": true,
   "packageManager": "pnpm@10.28.0",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "pnpm -r --filter ./packages/** build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "synth": "pnpm --filter infra synth",
-    "web:build": "pnpm --filter web build"
+    "web:build": "pnpm --filter web build",
+    "test:int": "scripts/test-int.sh"
   }
 }

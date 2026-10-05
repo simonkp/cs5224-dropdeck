@@ -19,11 +19,15 @@ export function cachedSecret(load: () => Promise<string>): () => Promise<string>
 
 let ssm: SSMClient | undefined;
 
-/** Reads the SecureString named by env var `envName` (e.g. TOKEN_KEY_PARAM). */
+/**
+ * Reads the SecureString named by env var `envName` (e.g. TOKEN_KEY_PARAM).
+ * `literal:<value>` skips SSM; for tests and local runs only (the stack always sets a parameter name).
+ */
 export function ssmSecret(envName: string): () => Promise<string> {
   return cachedSecret(async () => {
     const name = process.env[envName];
     if (!name) throw new Error(`Missing env ${envName}`);
+    if (name.startsWith('literal:')) return name.slice('literal:'.length);
     ssm ??= new SSMClient({});
     const r = await ssm.send(new GetParameterCommand({ Name: name, WithDecryption: true }));
     const value = r.Parameter?.Value;
