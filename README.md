@@ -4,6 +4,7 @@ Hosted drops for small Singapore merchants: a countdown, a fair waiting room, an
 oversell. CS5224 Cloud Computing, AY2026/27 Sem 1, Team 8.
 
 - **Build plan:** the team's DropDeck Build Plan doc (Claude Docs).
+- **Start here:** [`docs/handover.md`](docs/handover.md) (state, setup, runbook, known gaps) and [`docs/api.md`](docs/api.md) (API contract).
 - **Decisions:** [`docs/decisions/`](docs/decisions/README.md). **AI-use log:** [`docs/ai-use.md`](docs/ai-use.md).
 
 ## Layout
