@@ -18,8 +18,11 @@ export class GithubOidcStack extends Stack {
     const role = new Role(this, 'DeployRole', {
       roleName: 'dropdeck-github-deploy',
       assumedBy: new WebIdentityPrincipal(provider.openIdConnectProviderArn, {
-        StringEquals: { 'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com' },
-        StringLike: { 'token.actions.githubusercontent.com:sub': `repo:${props.githubRepo}:ref:refs/heads/main` },
+        // The deploy job declares `environment: staging`, which makes GitHub put the environment (not the ref) in `sub`.
+        StringEquals: {
+          'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
+          'token.actions.githubusercontent.com:sub': `repo:${props.githubRepo}:environment:staging`,
+        },
       }),
     });
     role.addToPolicy(new PolicyStatement({
