@@ -1,6 +1,6 @@
 # Merchant study kit
 
-Owner: Gurbind (with Shaowei). Target: 3–5 merchants who sell in drops today. Recruitment runs 5–18 Oct;
+Anyone on the team can help recruit and run sessions. Target: 3–5 merchants who sell in drops today. Recruitment runs 5–18 Oct;
 sessions 26 Oct – 8 Nov, once the console is usable in `staging`.
 
 | File | Use |

@@ -1,6 +1,6 @@
 # Evaluation harness
 
-Owned by Liwen from 19 Oct (drafting from the API contract before then). Each experiment writes its raw
+Anyone on the team can pick up an experiment; the API contract is in [`docs/api.md`](../docs/api.md). Each experiment writes its raw
 output under `eval/results/<date>-<experiment>/` and a one-line summary into `eval/results/SUMMARY.md`.
 
 | Experiment | Script (planned) | Reported result |

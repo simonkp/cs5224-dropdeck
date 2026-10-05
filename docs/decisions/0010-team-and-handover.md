@@ -23,3 +23,9 @@ Reviews during the build keep the code familiar at handover and spread viva read
 ## Change from the preliminary report
 
 Replaces the five-stream split in §4 of the preliminary report.
+
+## Amendment (2026-10-05): no fixed handover
+
+The end-to-end path was built ahead of schedule, so there is no handover date and no ownership split. Anyone can
+contribute to any part from now on, through pull requests to `main`. The split above remains a suggestion of who
+might lead what, not ownership. See [`docs/handover.md`](../handover.md).

@@ -1,8 +1,8 @@
 # Handover
 
-State of the build on 5 Oct 2026, written for the 19 Oct handover (decision 0010). From then **Liwen and Fung Wei**
-own enhancements, unhappy paths and testing; **Gurbind and Shaowei** own recruitment, the user study and the
-business case.
+State of the build on 5 Oct 2026. **Anyone on the team can contribute from now on**: pick a known gap, an
+experiment or a part of the study, work on a branch, and open a pull request to `main`. CI runs every test on the
+pull request, and deploys staging once it is merged. Everything you need to get going is on this page.
 
 **For now, staging runs in Simon's AWS account**, so only Simon can open its AWS console and logs. Everyone can
 still deploy staging (push to `main`) and run a full copy in their own account. The team can move staging to
@@ -203,7 +203,7 @@ and if you change a guard, break it on purpose once to check a test fails.
    the cohort drop move to a member's own account (Simon is asking the module staff).
 3. **For now only Simon can see staging's AWS console and logs**, because sandbox accounts are per student. Deploy
    staging by pushing to `main`, debug on your own copy, or move staging (option B above) if the team prefers.
-4. **Evaluation tooling (Phase 5, Liwen):** k6 load at 1×, 3×, 10× and a ramp; counter ceiling by shard count;
+4. **Evaluation tooling (Phase 5):** k6 load at 1×, 3×, 10× and a ramp; counter ceiling by shard count;
    fairness from the `ticket` log lines (draw on vs off); elasticity at open; cost per drop. Metrics are
    structured log lines today, not CloudWatch metrics (EMF would make dashboards cheap).
 5. **Checkout UX:** after a refresh the hold page forgets a code was sent, and a buyer spends another of their
@@ -221,7 +221,6 @@ and if you change a guard, break it on purpose once to check a test fails.
 | Date | What |
 | --- | --- |
 | 18 Oct | Merchant recruitment closes (tracker in `eval/merchant-study/tracker.csv`) |
-| 19 Oct | This handover |
 | 26 Oct | Feature freeze; merchant sessions start on staging |
 | 30 Oct | Cohort drop (backup 6 Nov), after the freeze |
 | 13 Nov | Final report, slides, presentation |
