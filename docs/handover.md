@@ -2,7 +2,7 @@
 
 State of the build on 5 Oct 2026, written for the 19 Oct handover (decision 0010). From then **Liwen and Fung Wei**
 own enhancements, unhappy paths and testing; **Gurbind and Shaowei** own recruitment, the user study and the
-business case; **Simon** stays on reviews. Read this, then [`api.md`](api.md), [`degradation.md`](degradation.md)
+business case; staging's AWS account (and its logs) stays with **Simon**. Read this, then [`api.md`](api.md), [`degradation.md`](degradation.md)
 and the [decision log](decisions/README.md).
 
 ## Where things stand
