@@ -35,7 +35,8 @@ export class GithubOidcStack extends Stack {
     });
     role.addToPolicy(new PolicyStatement({
       effect: Effect.ALLOW,
-      actions: ['sts:AssumeRole'],
+      // The CDK CLI tags the sessions it opens on the bootstrap roles, which needs sts:TagSession as well.
+      actions: ['sts:AssumeRole', 'sts:TagSession'],
       resources: [`arn:aws:iam::${this.account}:role/cdk-*`],
     }));
     new CfnOutput(this, 'DeployRoleArn', { value: role.roleArn });
