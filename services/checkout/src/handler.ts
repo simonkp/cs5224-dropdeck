@@ -20,7 +20,23 @@ const tokenKey = ssmSecret('TOKEN_KEY_PARAM');
 const emailKey = ssmSecret('EMAIL_HASH_KEY_PARAM');
 
 const REF_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-const newRef = () => Array.from({ length: 6 }, () => REF_ALPHABET[randomInt(REF_ALPHABET.length)]).join('');
+/** 8 characters from 31: about 8.5e11 values, so a same-drop collision is negligible; the put is conditional anyway. */
+const newRef = () => Array.from({ length: 8 }, () => REF_ALPHABET[randomInt(REF_ALPHABET.length)]).join('');
+
+/** Never overwrite another buyer's order: the ref must be new, or already belong to this hold (a retry). */
+async function putOrder(order: Order): Promise<void> {
+  try {
+    await ddb.send(new PutCommand({
+      TableName: table(),
+      Item: { ...keys.order(order.tenantId, order.dropId, order.ref), type: 'Order', ...order },
+      ConditionExpression: 'attribute_not_exists(PK) OR holdId = :h',
+      ExpressionAttributeValues: { ':h': order.holdId },
+    }));
+  } catch (e) {
+    if (isConditionFailure(e)) console.error(JSON.stringify({ level: 'error', msg: 'order ref collision', ref: order.ref, holdId: order.holdId }));
+    throw e;
+  }
+}
 
 async function confirmation(drop: Drop, order: Order) {
   const profile = await getProfile(drop.tenantId);
@@ -51,7 +67,7 @@ async function ensureOrder(drop: Drop, hold: Hold): Promise<Order> {
   const existing = strip<Order>((await ddb.send(new GetCommand({ TableName: table(), Key: k }))).Item);
   if (existing) return existing;
   const order = buildOrder(drop, hold, hold.orderRef!, hold.name ?? '', hold.email ?? '');
-  await ddb.send(new PutCommand({ TableName: table(), Item: { ...k, type: 'Order', ...order } }));
+  await putOrder(order);
   return order;
 }
 
@@ -101,7 +117,7 @@ async function confirm(drop: Drop, hold: Hold, body: { name?: unknown; email?: u
     throw new ApiError('HOLD_EXPIRED', 'Your hold has expired');
   }
   const order = buildOrder(drop, hold, ref, name, email);
-  await ddb.send(new PutCommand({ TableName: table(), Item: { ...keys.order(drop.tenantId, drop.dropId, ref), type: 'Order', ...order } }));
+  await putOrder(order);
   console.log(JSON.stringify({ metric: 'order', t: drop.tenantId, d: drop.dropId, ref, holdId: hold.holdId, qty: hold.qty, msFromHold: now - hold.createdAt }));
   return confirmation(drop, order);
 }

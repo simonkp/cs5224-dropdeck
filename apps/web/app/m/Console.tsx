@@ -320,6 +320,7 @@ function DropEditor(props: { drop?: Drop; onSaved: () => void; onCancel: () => v
             <option value="email">Email code at checkout</option>
             <option value="off">None</option>
           </select>
+          {verification === 'email' && <small className="muted">Email codes are not live yet: choose None to test checkout.</small>}
         </label>
         <label>
           Admission pace

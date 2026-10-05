@@ -122,7 +122,7 @@ describe.skipIf(!enabled)('buyer path against DynamoDB Local', () => {
       const b = await heldBy(drop, 2);
       const ok = parse(await checkout(http.checkout('confirm', a.holdId, a.hold, { name: 'Ann', email: 'Ann.Lee+drop@gmail.com' })));
       expect(ok.status).toBe(200);
-      expect(ok.orderRef).toMatch(/^[A-Z2-9]{6}$/);
+      expect(ok.orderRef).toMatch(/^[A-Z2-9]{8}$/);
       expect(ok.amountCents).toBe(800);
 
       const dup = parse(await checkout(http.checkout('confirm', b.holdId, b.hold, { name: 'Ann', email: 'annlee@gmail.com' })));

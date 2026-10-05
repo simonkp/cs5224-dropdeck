@@ -4,6 +4,8 @@ import { BatchWriteCommand, DynamoDBDocumentClient, PutCommand, QueryCommand, Sc
 import { keys, shardCapacities, type Drop } from '@dropdeck/shared';
 
 export const enabled = Boolean(process.env.DYNAMODB_LOCAL);
+// CI's integration job sets this, so a broken endpoint fails the job instead of skipping every test.
+if (process.env.REQUIRE_INTEGRATION && !enabled) throw new Error('REQUIRE_INTEGRATION is set but DYNAMODB_LOCAL is not');
 
 const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}), { marshallOptions: { removeUndefinedValues: true } });
 

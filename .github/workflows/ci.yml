@@ -48,6 +48,7 @@ jobs:
       - run: pnpm --filter @dropdeck/integration-tests test
         env:
           DYNAMODB_LOCAL: http://localhost:8000
+          REQUIRE_INTEGRATION: '1'
 
   deploy-staging:
     # Skipped (not failed) until the OIDC stack is deployed and AWS_DEPLOY_ROLE_ARN is set as a repo variable.

@@ -21,6 +21,8 @@ One DynamoDB table (on-demand) with PK/SK as in `packages/shared/src/keys.ts`, p
 
 DynamoDB TTL is a backstop only; expiry is checked on read and swept by the controller.
 
+A claim reserves stock before writing its hold, so a crash between the two leaks units (undersell) rather than leaving an active hold with nothing behind it for the sweep to "return" (oversell). Condition expressions cannot do arithmetic, so the reserve is `sold <= capacity - q`, with each shard's capacity derived from the drop config.
+
 ## Change from the preliminary report
 
 Refines the preliminary data model; tickets no longer stored.
