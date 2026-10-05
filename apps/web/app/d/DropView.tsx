@@ -160,10 +160,16 @@ function Buyer({ ids, drop, state, serverNow }: { ids: { t: string; d: string };
     }
   };
 
+  const allReserved = drop.variants.every((v) => state?.soldOut?.[v.id]);
+  const reservedNote = allReserved && (
+    <p className="muted">Everything is reserved right now. Unpaid holds expire after {Math.round(drop.holdSec / 60)} min and go back to stock, so it is worth keeping your place.</p>
+  );
+
   if (!session) {
     const live = state?.state === 'Live';
     return (
       <>
+        {reservedNote}
         <button disabled={busy || !live} onClick={join}>{busy ? 'Joining…' : 'Join the queue'}</button>
         {!live && <p className="muted">Opening the queue…</p>}
         {live && Date.parse(drop.openAt) + 30_000 > serverNow && (
@@ -174,7 +180,7 @@ function Buyer({ ids, drop, state, serverNow }: { ids: { t: string; d: string };
     );
   }
   if (session.stage === 'queued') {
-    return <Queued session={session} drop={drop} state={state} serverNow={serverNow} ids={ids} setSession={setSession} onStartOver={startOver} />;
+    return <>{reservedNote}<Queued session={session} drop={drop} state={state} serverNow={serverNow} ids={ids} setSession={setSession} onStartOver={startOver} /></>;
   }
   if (session.stage === 'held') {
     return <Held session={session} drop={drop} serverNow={serverNow} setSession={setSession} onStartOver={startOver} />;

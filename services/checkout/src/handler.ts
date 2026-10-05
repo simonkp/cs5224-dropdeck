@@ -73,6 +73,8 @@ async function ensureOrder(drop: Drop, hold: Hold): Promise<Order> {
 
 async function confirm(drop: Drop, hold: Hold, body: { name?: unknown; email?: unknown }, now: number) {
   if (hold.state === 'confirmed') return confirmation(drop, await ensureOrder(drop, hold));
+  // Closed still allows checkout: a buyer holding stock at endAt keeps the rest of their hold window.
+  if (drop.state === 'Cancelled') throw new ApiError('INVALID_STATE', 'This drop was cancelled by the merchant');
   if (hold.state !== 'active' || hold.expiresAt <= now) throw new ApiError('HOLD_EXPIRED', 'Your hold has expired');
   if (drop.verification === 'email') {
     // Phase 4 adds the email code; until then only drops with verification off can check out.

@@ -77,17 +77,24 @@ export async function returnUnits(t: string, d: string, variantId: string, shard
 /**
  * Release an active hold and return its units. The flip active → released is conditional, so when two
  * sweepers (or a sweeper and a checkout) race, exactly one returns the units: no double release, no oversell.
- * Returns false if the hold was no longer active.
+ * `expiredBy` (epoch ms) additionally requires the hold to have expired by then: the sweep passes it, so it can
+ * never take a hold from a buyer who is still inside their window. Returns false if the condition failed.
  */
-export async function releaseHold(hold: Pick<Hold, 'tenantId' | 'dropId' | 'holdId' | 'variantId' | 'shard' | 'qty'>): Promise<boolean> {
+export async function releaseHold(
+  hold: Pick<Hold, 'tenantId' | 'dropId' | 'holdId' | 'variantId' | 'shard' | 'qty'>,
+  opts: { expiredBy?: number } = {},
+): Promise<boolean> {
   try {
     await ddb.send(new UpdateCommand({
       TableName: table(),
       Key: keys.hold(hold.tenantId, hold.dropId, hold.holdId),
       UpdateExpression: 'SET #s = :released REMOVE GSI1PK, GSI1SK',
-      ConditionExpression: '#s = :active',
+      ConditionExpression: opts.expiredBy === undefined ? '#s = :active' : '#s = :active AND expiresAt <= :now',
       ExpressionAttributeNames: { '#s': 'state' },
-      ExpressionAttributeValues: { ':released': 'released', ':active': 'active' },
+      ExpressionAttributeValues: {
+        ':released': 'released', ':active': 'active',
+        ...(opts.expiredBy === undefined ? {} : { ':now': opts.expiredBy }),
+      },
     }));
   } catch (e) {
     if (isConditionFailure(e)) return false;

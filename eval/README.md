@@ -10,7 +10,7 @@ output under `eval/results/<date>-<experiment>/` and a one-line summary into `ev
 | Counter ceiling | `k6/claim-one-shard.js` with shardCount 1, 2, 4, 8 | write rate where one item saturates |
 | Elasticity | CloudWatch query at open | cold-start share, time to serve at peak |
 | Fairness | `fairness.ipynb` over ticket metrics | displacement distribution, draw on/off |
-| Resilience | fault switches in `staging` | behaviour vs degradation policy |
+| Resilience | fault switches in `staging` | behaviour vs [`docs/degradation.md`](../docs/degradation.md) |
 | Cost per drop | `cost.ipynb` over per-drop metrics and the bill | cost per 1,000 admitted buyers |
 
 Reference workload: 200 units, about 5,000 buyer sessions, a 10-minute window. Run heavy tests in the

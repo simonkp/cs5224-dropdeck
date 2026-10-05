@@ -4,8 +4,9 @@ import {
   admissionStartsAt, admittedCount, dropAdmissionRate, FREEZE_DELAY_MS, keys, watermark, type Drop, type PublicState,
 } from '@dropdeck/shared';
 import { ddb, getDrop, isConditionFailure, table } from '@dropdeck/shared/ddb';
+import { activeHoldCount, closeDrop, soldOutFlags, sweepExpired, unitsSold, voidActiveHolds } from './ops.js';
 import { writeState } from './publish.js';
-import { upsertTickSchedule } from './schedule.js';
+import { deleteTickSchedule, upsertTickSchedule } from './schedule.js';
 
 /**
  * Invoked by EventBridge Scheduler.
@@ -15,8 +16,10 @@ import { upsertTickSchedule } from './schedule.js';
  * Stateless and safe to run twice: the watermark is a function of time and the frozen early-group size,
  * and every write that is not a function of time is conditional (decision 0003).
  *
- * Phase 3 adds to each tick: sweep expired holds (conditional active → released), sold-out flags, closing
- * at endAt or one hold window after the last sell-out, and stopping on a Cancelled drop.
+ * Each tick: sweep expired holds back to stock, publish the watermark and sold-out flags, and close the drop at
+ * endAt or once every variant is gone with no hold left open (at most one hold window after the last sale).
+ * A drop that is no longer Live is finished: holds voided if it was cancelled, the terminal state.json
+ * republished, the tick schedule deleted.
  */
 interface ControllerEvent {
   action: 'open' | 'tick';
@@ -80,19 +83,54 @@ async function freezeEarlyCount(drop: Drop): Promise<number> {
   }
 }
 
+/**
+ * Wind down a Closed or Cancelled drop. Idempotent, so every controller that notices runs it. Republishing the
+ * terminal state.json here is what settles a merchant cancel racing a tick: the tick read Live, the merchant wrote
+ * Cancelled, the tick's Live write landed last; the next tick sees Cancelled and puts the right file back.
+ */
+async function finish(drop: Drop, nowMs: number, soldOut?: Record<string, boolean>): Promise<void> {
+  if (drop.state === 'Cancelled') {
+    const voided = await voidActiveHolds(drop);
+    if (voided) log('holds voided on cancel', { t: drop.tenantId, d: drop.dropId, voided });
+  }
+  await writeState(drop.tenantId, drop.dropId, {
+    state: drop.state, serverTime: new Date(nowMs).toISOString(), rThreshold: 0, nWatermark: 0,
+    earlyCount: drop.earlyCount ?? null, soldOut: soldOut ?? soldOutFlags(drop, await unitsSold(drop)),
+  });
+  await deleteTickSchedule(drop);
+}
+
 /** One tick. Returns the state it published (or would have), or null when the drop is no longer Live. */
 export async function tickOnce(t: string, d: string, nowMs: number, last?: PublicState): Promise<PublicState | null> {
   const drop = await getDrop(t, d); // fresh each tick: state and earlyCount must be current
+  if (drop.state === 'Closed' || drop.state === 'Cancelled') {
+    await finish(drop, nowMs);
+    return null;
+  }
   if (drop.state !== 'Live') return null;
+
+  const released = await sweepExpired(drop, nowMs);
+  if (released) log('expired holds released', { t, d, released });
+  const soldOut = soldOutFlags(drop, await unitsSold(drop));
+  const allGone = drop.variants.every((v) => soldOut[v.id]);
+  if (nowMs >= Date.parse(drop.endAt) || (allGone && (await activeHoldCount(drop)) === 0)) {
+    const closed = await closeDrop(drop, nowMs);
+    if (closed) log('drop closed', { t, d, reason: allGone ? 'sold out' : 'ended' });
+    // Re-read: if a cancel won the race, finish the drop as Cancelled.
+    await finish(closed ? { ...drop, state: 'Closed' } : await getDrop(t, d), nowMs, soldOut);
+    return null;
+  }
+
   const start = admissionStartsAt(drop);
   let early = drop.earlyCount;
   if (early === undefined && nowMs >= start + FREEZE_DELAY_MS) early = await freezeEarlyCount(drop);
   const wm = early === undefined
     ? { rThreshold: 0, nWatermark: 0 }
     : watermark(admittedCount(start, dropAdmissionRate(drop), nowMs), early);
-  const state: PublicState = { state: 'Live', serverTime: new Date(nowMs).toISOString(), ...wm, earlyCount: early ?? null, soldOut: {} };
-  // Publish only when something moved (the first tick of each invocation always publishes).
-  const moved = !last || wm.rThreshold > last.rThreshold || wm.nWatermark > last.nWatermark || state.earlyCount !== last.earlyCount;
+  const state: PublicState = { state: 'Live', serverTime: new Date(nowMs).toISOString(), ...wm, earlyCount: early ?? null, soldOut };
+  // Publish only when something changed (the first tick of each invocation always publishes).
+  const moved = !last || wm.rThreshold > last.rThreshold || wm.nWatermark > last.nWatermark
+    || state.earlyCount !== last.earlyCount || JSON.stringify(soldOut) !== JSON.stringify(last.soldOut);
   if (moved) await writeState(t, d, state);
   return state;
 }

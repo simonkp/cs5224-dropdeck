@@ -12,7 +12,7 @@ oversell. CS5224 Cloud Computing, AY2026/27 Sem 1, Team 8.
 | --- | --- |
 | `packages/shared` | Types, error codes, key builders, signed tokens, email normalisation, lifecycle and admission maths (pure, unit-tested) |
 | `services/merchant-api` | Merchant routes: profile, drop CRUD, schedule/unschedule/cancel/duplicate |
-| `services/ticket`, `claim`, `checkout`, `controller` | Buyer path and scheduler target. Email code at checkout and the controller's hold sweep, sold-out flags and close are still to come |
+| `services/ticket`, `claim`, `checkout`, `controller` | Buyer path and scheduler target (the email code at checkout is still to come). Failure behaviour: [`docs/degradation.md`](docs/degradation.md) |
 | `apps/web` | Next.js static export: landing, `/d/{tenant}/{drop}` drop page, `/m/` console |
 | `infra` | AWS CDK app: one stack per stage, plus a one-off GitHub OIDC stack |
 | `tests/integration` | Real handlers in-process against DynamoDB Local (`pnpm test:int`, needs Docker; also a CI job) |
