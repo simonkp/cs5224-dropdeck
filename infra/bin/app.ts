@@ -28,4 +28,5 @@ Tags.of(stack).add('Stage', stage);
 
 // One-off per shared account: lets GitHub Actions deploy through the CDK bootstrap roles.
 const githubRepo = String(app.node.tryGetContext('githubRepo') ?? '');
-if (githubRepo) new GithubOidcStack(app, 'DropDeck-GithubOidc', { env, githubRepo });
+const githubSubPrefix = String(app.node.tryGetContext('githubSubPrefix') ?? '') || undefined;
+if (githubRepo) new GithubOidcStack(app, 'DropDeck-GithubOidc', { env, githubRepo, githubSubPrefix });

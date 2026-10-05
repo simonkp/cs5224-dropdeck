@@ -40,7 +40,9 @@ npx cdk destroy DropDeck-dev-simon -c stage=dev-simon   # when idle
 ../scripts/put-secrets.sh dev-simon       # signing keys as SSM SecureStrings (week 2)
 ```
 
-Shared account, once: `npx cdk deploy DropDeck-GithubOidc -c githubRepo=<owner>/<repo>`, then add the
+Shared account, once: `npx cdk deploy DropDeck-GithubOidc -c githubRepo=<owner>/<repo> -c githubSubPrefix=<prefix>`
+(the prefix is `sub_claim_prefix` from `gh api repos/<owner>/<repo>/actions/oidc/customization/sub`; repos on GitHub's
+immutable subjects send IDs, not names, and the name-only trust is refused), then add the
 output role ARN as the `AWS_DEPLOY_ROLE_ARN` repository variable and `BUDGET_EMAIL` as another.
 Merges to `main` then deploy `staging` and run a smoke test; until `AWS_DEPLOY_ROLE_ARN` is set the
 deploy job is skipped rather than failing.
