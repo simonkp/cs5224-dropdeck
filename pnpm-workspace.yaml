@@ -4,6 +4,7 @@ packages:
   - apps/*
   - infra
   - tests/*
+  - eval
 onlyBuiltDependencies:
   - esbuild
   - sharp

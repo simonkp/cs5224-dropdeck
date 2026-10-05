@@ -67,6 +67,8 @@ export interface PublicDrop {
   entryOpensAt: string;
   perBuyerLimit: number;
   holdSec: number;
+  /** Seconds an admitted buyer has to claim; the page shows it as a countdown. */
+  admitWindowSec: number;
   verification: VerificationMode;
 }
 

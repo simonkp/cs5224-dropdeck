@@ -25,6 +25,7 @@ export function toPublicDrop(drop: Drop, profile: MerchantProfile | undefined): 
     entryOpensAt: entryOpensAt(drop).toISOString(),
     perBuyerLimit: drop.perBuyerLimit,
     holdSec: drop.holdSec,
+    admitWindowSec: drop.admitWindowSec,
     verification: drop.verification,
   };
 }

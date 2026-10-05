@@ -39,3 +39,4 @@ button.danger { color: #b42318; }
 .form .row.variant button { margin-bottom: 12px; }
 fieldset { border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin: 0 0 12px; }
 legend { padding: 0 6px; font-size: 14px; }
+.hero { width: 100%; border-radius: 12px; margin: 8px 0; }

@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { PublicDrop, PublicState } from '@dropdeck/shared';
+import { buyerApi, BuyerApiError, loadSession, queueStatus, saveSession, type BuyerSession, type Confirmation } from './buyer';
 
 const POLL_MS = 2000;
 
@@ -18,6 +19,10 @@ const fmt = (ms: number) => {
   if (ms <= 0) return '00:00:00';
   const s = Math.floor(ms / 1000);
   return [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60].map((n) => String(n).padStart(2, '0')).join(':');
+};
+const fmtShort = (ms: number) => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
 
 const price = (cents: number) => `S$${(cents / 100).toFixed(2)}`;
@@ -86,12 +91,13 @@ export default function DropView() {
   }, [drop, state, serverNow]);
 
   if (error) return <main><h1>Drop not found</h1><p className="muted">{error}</p></main>;
-  if (!drop) return <main><p className="muted">Loading…</p></main>;
+  if (!drop || !ids) return <main><p className="muted">Loading…</p></main>;
 
   return (
     <main>
       <p className="muted">{drop.merchant.name}</p>
       <h1>{drop.title}</h1>
+      {drop.imageUrl && <img className="hero" src={drop.imageUrl} alt="" />}
       {drop.description && <p>{drop.description}</p>}
 
       <div className="card">
@@ -102,13 +108,8 @@ export default function DropView() {
             <div className="muted">Everyone who joins before {new Date(drop.openAt).toLocaleTimeString()} gets a random place, so there is no need to refresh at the exact second.</div>
           </>
         )}
-        {phase === 'open' && (
-          <>
-            <button disabled>Join the queue</button>
-            <p className="muted">Joining arrives in week 2 (ticket, waiting room, claim).</p>
-          </>
-        )}
-        {phase === 'closed' && <p>This drop has ended.</p>}
+        {phase === 'open' && <Buyer ids={ids} drop={drop} state={state} serverNow={serverNow} />}
+        {phase === 'closed' && <Ended ids={ids} text="This drop has ended." />}
         {phase === 'cancelled' && <p>This drop was cancelled by the merchant.</p>}
       </div>
 
@@ -122,5 +123,233 @@ export default function DropView() {
       </ul>
       <p className="muted">Limit {drop.perBuyerLimit} per buyer · held for {Math.round(drop.holdSec / 60)} min once claimed{drop.verification === 'email' ? ' · email code at checkout' : ''}</p>
     </main>
+  );
+}
+
+/** After the drop closes, a buyer who ordered still sees their confirmation. */
+function Ended({ ids, text }: { ids: { t: string; d: string }; text: string }) {
+  const s = loadSession(ids.t, ids.d);
+  if (s?.stage === 'confirmed') return <Confirmed c={s.confirmation} />;
+  return <p>{text}</p>;
+}
+
+function Buyer({ ids, drop, state, serverNow }: { ids: { t: string; d: string }; drop: PublicDrop; state: PublicState | null; serverNow: number }) {
+  const [session, setSessionState] = useState<BuyerSession | null>(() => loadSession(ids.t, ids.d));
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const setSession = useCallback((s: BuyerSession | null) => {
+    saveSession(ids.t, ids.d, s);
+    setSessionState(s);
+  }, [ids]);
+
+  const startOver = () => {
+    setNotice(null);
+    setSession(null);
+  };
+
+  const join = async () => {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const r = await buyerApi<{ ticket: string; r?: number; n?: number }>(`/api/d/${ids.t}/${ids.d}/ticket`);
+      setSession({ stage: 'queued', ticket: r.ticket, r: r.r, n: r.n });
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!session) {
+    const live = state?.state === 'Live';
+    return (
+      <>
+        <button disabled={busy || !live} onClick={join}>{busy ? 'Joining…' : 'Join the queue'}</button>
+        {!live && <p className="muted">Opening the queue…</p>}
+        {live && Date.parse(drop.openAt) + 30_000 > serverNow && (
+          <p className="muted">Join any time before {new Date(drop.openAt).toLocaleTimeString()}: places in the draw are random, not first-come.</p>
+        )}
+        {notice && <p className="error">{notice}</p>}
+      </>
+    );
+  }
+  if (session.stage === 'queued') {
+    return <Queued session={session} drop={drop} state={state} serverNow={serverNow} ids={ids} setSession={setSession} onStartOver={startOver} />;
+  }
+  if (session.stage === 'held') {
+    return <Held session={session} drop={drop} serverNow={serverNow} setSession={setSession} onStartOver={startOver} />;
+  }
+  return <Confirmed c={session.confirmation} />;
+}
+
+function Queued(props: {
+  session: Extract<BuyerSession, { stage: 'queued' }>;
+  drop: PublicDrop;
+  state: PublicState | null;
+  serverNow: number;
+  ids: { t: string; d: string };
+  setSession: (s: BuyerSession | null) => void;
+  onStartOver: () => void;
+}) {
+  const { session, drop, state, serverNow, ids } = props;
+  const [variantId, setVariantId] = useState(() => drop.variants.find((v) => !state?.soldOut?.[v.id])?.id ?? drop.variants[0]!.id);
+  const [qty, setQty] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [retryAt, setRetryAt] = useState(0);
+  const [expired, setExpired] = useState(false);
+  const status = queueStatus(session, state);
+  const admitted = status.admitted && Date.now() >= retryAt;
+
+  // Remember when this page first saw the turn arrive, to show how long is left to claim.
+  const { setSession } = props;
+  useEffect(() => {
+    if (admitted && !session.admittedSeenAt) setSession({ ...session, admittedSeenAt: serverNow });
+  }, [admitted, session, serverNow, setSession]);
+
+  const claim = async () => {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const r = await buyerApi<{ hold: string; holdId: string; expiresAt: string; variantId: string; qty: number }>(
+        `/api/d/${ids.t}/${ids.d}/claim`,
+        { body: { ticket: session.ticket, variantId, qty } },
+      );
+      setSession({ stage: 'held', ...r });
+    } catch (e) {
+      if (e instanceof BuyerApiError && e.code === 'NOT_ADMITTED') {
+        setRetryAt(Date.now() + (e.retryAfter ?? 2) * 1000);
+        setNotice('Almost your turn…');
+      } else if (e instanceof BuyerApiError && e.code === 'ADMISSION_EXPIRED') {
+        setExpired(true);
+      } else {
+        setNotice(e instanceof Error ? e.message : String(e));
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (expired) {
+    return (
+      <>
+        <p>Your turn to claim has passed.</p>
+        <button className="ghost" onClick={props.onStartOver}>Join again</button>
+      </>
+    );
+  }
+
+  if (!admitted) {
+    const drawPending = session.r !== undefined && (state?.earlyCount ?? null) === null;
+    return (
+      <>
+        <div className="muted">You’re in the queue</div>
+        {drawPending ? (
+          <p>You’re in the draw. Places are assigned when the drop opens at {new Date(drop.openAt).toLocaleTimeString()}; keep this page open.</p>
+        ) : (
+          <div className="big">{status.ahead === null ? '…' : `${status.ahead} ahead`}</div>
+        )}
+        <p className="muted">This page updates by itself. Refreshing will not move you forward or back.</p>
+        {notice && <p className="muted">{notice}</p>}
+      </>
+    );
+  }
+
+  const deadline = (session.admittedSeenAt ?? serverNow) + drop.admitWindowSec * 1000;
+  return (
+    <>
+      <div className="muted">It’s your turn · claim within {fmtShort(deadline - serverNow)}</div>
+      <div className="form">
+        <label>
+          Choose
+          <select value={variantId} onChange={(e) => setVariantId(e.target.value)}>
+            {drop.variants.map((v) => (
+              <option key={v.id} value={v.id} disabled={state?.soldOut?.[v.id]}>
+                {v.name} · {price(v.priceCents)}{state?.soldOut?.[v.id] ? ' (sold out)' : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+        {drop.perBuyerLimit > 1 && (
+          <label>
+            Quantity
+            <select value={qty} onChange={(e) => setQty(Number(e.target.value))}>
+              {Array.from({ length: drop.perBuyerLimit }, (_, i) => i + 1).map((q) => <option key={q} value={q}>{q}</option>)}
+            </select>
+          </label>
+        )}
+      </div>
+      <button disabled={busy} onClick={claim}>{busy ? 'Reserving…' : 'Reserve'}</button>
+      {notice && <p className="error">{notice}</p>}
+    </>
+  );
+}
+
+function Held(props: {
+  session: Extract<BuyerSession, { stage: 'held' }>;
+  drop: PublicDrop;
+  serverNow: number;
+  setSession: (s: BuyerSession | null) => void;
+  onStartOver: () => void;
+}) {
+  const { session, drop, serverNow } = props;
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const left = Date.parse(session.expiresAt) - serverNow;
+  const variant = drop.variants.find((v) => v.id === session.variantId);
+
+  const confirm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setNotice(null);
+    try {
+      const c = await buyerApi<Confirmation>(`/api/holds/${encodeURIComponent(session.holdId)}/confirm`, { token: session.hold, body: { name, email } });
+      props.setSession({ stage: 'confirmed', confirmation: c });
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (left <= 0) {
+    return (
+      <>
+        <p>Your hold expired and the item went back to stock.</p>
+        <button className="ghost" onClick={props.onStartOver}>Join again</button>
+      </>
+    );
+  }
+  return (
+    <form className="form" onSubmit={confirm}>
+      <div className="muted">Reserved for you · {fmtShort(left)} left to check out</div>
+      <p><strong>{session.qty} × {variant?.name}</strong> · {variant ? price(variant.priceCents * session.qty) : ''}</p>
+      <label>Name<input required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" /></label>
+      <label>Email<input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" /></label>
+      <small className="muted">One order per email for this drop. The merchant uses it to contact you about collection.</small>
+      <div className="actions">
+        <button disabled={busy}>{busy ? 'Confirming…' : 'Confirm order'}</button>
+      </div>
+      {notice && <p className="error">{notice}</p>}
+    </form>
+  );
+}
+
+function Confirmed({ c }: { c: Confirmation }) {
+  return (
+    <>
+      <div className="muted">Order confirmed</div>
+      <div className="big">{c.orderRef}</div>
+      <p>{c.qty} × {c.variantName} · <strong>{price(c.amountCents)}</strong></p>
+      {c.merchant.paynow ? (
+        <p>Pay <strong>{price(c.amountCents)}</strong> by PayNow to <strong>{c.merchant.paynow}</strong> with reference <strong>{c.orderRef}</strong>.</p>
+      ) : (
+        <p>{c.merchant.name} will contact you about payment.</p>
+      )}
+      {c.merchant.fulfilmentNote && <p className="muted">{c.merchant.fulfilmentNote}</p>}
+      <p className="muted">Keep this page or note your reference. DropDeck never takes card details.</p>
+    </>
   );
 }

@@ -12,10 +12,11 @@ oversell. CS5224 Cloud Computing, AY2026/27 Sem 1, Team 8.
 | --- | --- |
 | `packages/shared` | Types, error codes, key builders, signed tokens, email normalisation, lifecycle and admission maths (pure, unit-tested) |
 | `services/merchant-api` | Merchant routes: profile, drop CRUD, schedule/unschedule/cancel/duplicate |
-| `services/ticket`, `claim`, `checkout`, `controller` | Buyer path and scheduler target (week 2; TODO lists in each handler) |
+| `services/ticket`, `claim`, `checkout`, `controller` | Buyer path and scheduler target. Email code at checkout and the controller's hold sweep, sold-out flags and close are still to come |
 | `apps/web` | Next.js static export: landing, `/d/{tenant}/{drop}` drop page, `/m/` console |
 | `infra` | AWS CDK app: one stack per stage, plus a one-off GitHub OIDC stack |
-| `eval` | Load, fairness and cost experiments |
+| `tests/integration` | Real handlers in-process against DynamoDB Local (`pnpm test:int`, needs Docker; also a CI job) |
+| `eval` | Load, fairness and cost experiments (`oversell.ts` built) |
 
 ## First-time setup
 
@@ -23,6 +24,7 @@ oversell. CS5224 Cloud Computing, AY2026/27 Sem 1, Team 8.
 corepack enable            # pnpm 10 via packageManager
 pnpm install
 pnpm typecheck && pnpm test
+pnpm test:int              # oversell and friends against DynamoDB Local (Docker)
 pnpm web:build             # apps/web/out, uploaded by the CDK stack
 ```
 
