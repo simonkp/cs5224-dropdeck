@@ -1,6 +1,11 @@
 import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { CreateScheduleCommand, DeleteScheduleCommand, SchedulerClient } from '@aws-sdk/client-scheduler';
-import { entryOpensAt, s3Keys, type Drop, type MerchantProfile, type PublicDrop } from '@dropdeck/shared';
+import {
+  CreateScheduleCommand, DeleteScheduleCommand, SchedulerClient, UpdateScheduleCommand,
+  type CreateScheduleCommandInput,
+} from '@aws-sdk/client-scheduler';
+import {
+  entryOpensAt, s3Keys, type Drop, type DropState, type MerchantProfile, type PublicDrop, type PublicState,
+} from '@dropdeck/shared';
 import { env } from './env.js';
 
 const s3 = new S3Client({});
@@ -38,12 +43,34 @@ export async function deleteDropJson(drop: Drop): Promise<void> {
   await s3.send(new DeleteObjectCommand({ Bucket: env.bucket(), Key: s3Keys.dropJson(drop.tenantId, drop.dropId) }));
 }
 
+/** Pre-open (or terminal) state. Once Live, the controller owns state.json and rewrites it every tick. */
+export function initialState(state: DropState, now = new Date()): PublicState {
+  return { state, serverTime: now.toISOString(), rThreshold: 0, nWatermark: 0, earlyCount: null, soldOut: {} };
+}
+
+export async function writeStateJson(drop: Drop, state: DropState): Promise<void> {
+  await s3.send(new PutObjectCommand({
+    Bucket: env.bucket(),
+    Key: s3Keys.stateJson(drop.tenantId, drop.dropId),
+    Body: JSON.stringify(initialState(state)),
+    ContentType: 'application/json',
+    CacheControl: 'public, max-age=2',
+  }));
+}
+
+export async function deleteStateJson(drop: Drop): Promise<void> {
+  await s3.send(new DeleteObjectCommand({ Bucket: env.bucket(), Key: s3Keys.stateJson(drop.tenantId, drop.dropId) }));
+}
+
 const scheduleName = (drop: Drop) => `open-${drop.dropId}`;
 
-/** One-off schedule at the entry-window start; the controller moves the drop to Live. */
+/**
+ * One-off schedule at the entry-window start; the controller moves the drop to Live.
+ * Upserts, so a retried /schedule (or one after a failed rollback) does not trip on ConflictException.
+ */
 export async function createOpenSchedule(drop: Drop): Promise<void> {
   const at = entryOpensAt(drop).toISOString().slice(0, 19);
-  await scheduler.send(new CreateScheduleCommand({
+  const input: CreateScheduleCommandInput = {
     Name: scheduleName(drop),
     GroupName: env.scheduleGroup(),
     ScheduleExpression: `at(${at})`,
@@ -55,7 +82,13 @@ export async function createOpenSchedule(drop: Drop): Promise<void> {
       RoleArn: env.schedulerRoleArn(),
       Input: JSON.stringify({ action: 'open', tenantId: drop.tenantId, dropId: drop.dropId }),
     },
-  }));
+  };
+  try {
+    await scheduler.send(new CreateScheduleCommand(input));
+  } catch (e) {
+    if ((e as { name?: string }).name !== 'ConflictException') throw e;
+    await scheduler.send(new UpdateScheduleCommand(input));
+  }
 }
 
 export async function deleteOpenSchedule(drop: Drop): Promise<void> {

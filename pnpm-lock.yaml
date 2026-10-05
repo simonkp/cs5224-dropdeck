@@ -65,6 +65,10 @@ importers:
         version: 4.1.11(@types/node@22.20.5)(vite@8.3.2(@types/node@22.20.5)(esbuild@0.28.2)(tsx@4.23.15))
 
   packages/shared:
+    dependencies:
+      '@aws-sdk/client-ssm':
+        specifier: ^3.1146.0
+        version: 3.1146.0
     devDependencies:
       '@types/node':
         specifier: ^22.20.5
@@ -135,6 +139,9 @@ importers:
         specifier: ^3.1146.0
         version: 3.1146.0
       '@aws-sdk/client-s3':
+        specifier: ^3.1146.0
+        version: 3.1146.0
+      '@aws-sdk/client-scheduler':
         specifier: ^3.1146.0
         version: 3.1146.0
       '@aws-sdk/lib-dynamodb':
@@ -246,6 +253,10 @@ packages:
 
   '@aws-sdk/client-sesv2@3.1146.0':
     resolution: {integrity: sha512-3sMaymLxzaP1Ldqmu8mU4Uj2qLMDl8hHb3WYiM+H2fFHOnpTGVSToB5s15qCb0sAWqbXmFf+0vBLfwazpB8LzA==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/client-ssm@3.1146.0':
+    resolution: {integrity: sha512-Qx29jzZEVPpxUxzRNs1wwHg2qtOmHcwa3p1Bbufixg7SnyLg3zdLbhbK6oeeRnFDPBdlcjacURI/5JY+aSmu/Q==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/core@3.978.1':
@@ -1324,6 +1335,17 @@ snapshots:
       '@aws-sdk/core': 3.978.1
       '@aws-sdk/credential-provider-node': 3.972.84
       '@aws-sdk/signature-v4-multi-region': 3.996.47
+      '@aws-sdk/types': 3.974.6
+      '@smithy/core': 3.35.1
+      '@smithy/fetch-http-handler': 5.8.0
+      '@smithy/node-http-handler': 4.12.1
+      '@smithy/types': 4.19.0
+      tslib: 2.8.1
+
+  '@aws-sdk/client-ssm@3.1146.0':
+    dependencies:
+      '@aws-sdk/core': 3.978.1
+      '@aws-sdk/credential-provider-node': 3.972.84
       '@aws-sdk/types': 3.974.6
       '@smithy/core': 3.35.1
       '@smithy/fetch-http-handler': 5.8.0

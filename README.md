@@ -43,6 +43,10 @@ output role ARN as the `AWS_DEPLOY_ROLE_ARN` repository variable and `BUDGET_EMA
 Merges to `main` then deploy `staging` and run a smoke test; until `AWS_DEPLOY_ROLE_ARN` is set the
 deploy job is skipped rather than failing.
 
+Console against a deployed dev stage from `next dev`: deploy with `-c webOrigins='["http://localhost:3000"]'`
+(honoured on `dev-*` stages only), copy that stage's `<SiteUrl>/config.json` to `apps/web/public/config.json`
+(git-ignored), then `pnpm --filter web dev`.
+
 ## Guardrails (tested in `infra/test`)
 
 - No VPC, NAT gateway, cache cluster or WAF: nothing bills by the hour.
@@ -56,5 +60,5 @@ deploy job is skipped rather than failing.
 - [x] Merchant API: profile, drop CRUD, lifecycle transitions, publish `drop.json`, open schedule
 - [x] Drop page reading `drop.json`, polling `state.json`, countdown on server time
 - [ ] Create GitHub repo, push, deploy OIDC stack, first green `staging` deploy
-- [ ] Console sign-in (Cognito) and drop editor
+- [x] Console sign-in (Cognito managed login, code + PKCE) and drop editor (code done; not yet deployed)
 - [ ] Buy domain, verify in SES, request production access

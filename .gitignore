@@ -9,3 +9,4 @@ coverage/
 !.env.example
 tmp/
 *.tsbuildinfo
+apps/web/public/config.json

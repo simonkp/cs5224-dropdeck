@@ -11,7 +11,7 @@ import {
   ViewerProtocolPolicy, CacheQueryStringBehavior, CacheHeaderBehavior, CacheCookieBehavior,
 } from 'aws-cdk-lib/aws-cloudfront';
 import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
-import { AccountRecovery, UserPool, UserPoolClient } from 'aws-cdk-lib/aws-cognito';
+import { AccountRecovery, OAuthScope, UserPool, UserPoolClient, UserPoolClientIdentityProvider } from 'aws-cdk-lib/aws-cognito';
 import { AttributeType, Billing, TableV2 } from 'aws-cdk-lib/aws-dynamodb';
 import { PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { Architecture, Runtime } from 'aws-cdk-lib/aws-lambda';
@@ -20,9 +20,20 @@ import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { BlockPublicAccess, Bucket, BucketEncryption } from 'aws-cdk-lib/aws-s3';
 import { BucketDeployment, Source } from 'aws-cdk-lib/aws-s3-deployment';
 import { CfnScheduleGroup } from 'aws-cdk-lib/aws-scheduler';
+import { StringParameter } from 'aws-cdk-lib/aws-ssm';
 import type { Construct } from 'constructs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+
+/** CloudFront Function (viewer request). Exported for the unit test, which runs it in Node. */
+export const REWRITE_FN = `function handler(event) {
+  var r = event.request; var uri = r.uri;
+  var last = uri.split('/').pop();
+  if (last.indexOf('.') !== -1) return r;
+  if (uri.indexOf('/d/') === 0) { r.uri = '/d/index.html'; return r; }
+  if (uri.endsWith('/')) { r.uri = uri + 'index.html'; return r; }
+  r.uri = uri + '/index.html'; return r;
+}`;
 const repoRoot = path.resolve(here, '../..');
 
 export interface DropDeckStackProps extends StackProps {
@@ -41,6 +52,8 @@ export class DropDeckStack extends Stack {
     super(scope, id, props);
     const { stage } = props;
     const ephemeral = stage !== 'prod';
+    // Local dev servers (e.g. localhost:3000) may call the API and use the login callback only on dev stages.
+    const devOrigins = stage.startsWith('dev') ? props.webOrigins : [];
 
     // ---- Data: one on-demand table, sparse GSI1 for hold expiry ----
     const table = new TableV2(this, 'Table', {
@@ -87,16 +100,10 @@ export class DropDeckStack extends Stack {
       cookieBehavior: CacheCookieBehavior.none(),
     });
 
-    // /d/{tenant}/{drop} and other extension-less paths map onto the static export.
+    // /d/{tenant}/{drop}[/] and other extension-less paths map onto the static export.
+    // The /d/ check comes first: with trailingSlash the canonical drop URL ends in '/'.
     const rewrite = new CfFunction(this, 'RewriteFn', {
-      code: FunctionCode.fromInline(`function handler(event) {
-  var r = event.request; var uri = r.uri;
-  if (uri.endsWith('/')) { r.uri = uri + 'index.html'; return r; }
-  var last = uri.split('/').pop();
-  if (last.indexOf('.') !== -1) return r;
-  if (uri.indexOf('/d/') === 0) { r.uri = '/d/index.html'; return r; }
-  r.uri = uri + '/index.html'; return r;
-}`),
+      code: FunctionCode.fromInline(REWRITE_FN),
     });
 
     const distribution = new Distribution(this, 'Cdn', {
@@ -122,10 +129,25 @@ export class DropDeckStack extends Stack {
       accountRecovery: AccountRecovery.EMAIL_ONLY,
       removalPolicy: ephemeral ? RemovalPolicy.DESTROY : RemovalPolicy.RETAIN,
     });
+    // Managed login (hosted UI) with the authorization-code + PKCE flow: a static site needs no SRP code.
+    const userPoolDomain = userPool.addDomain('LoginDomain', {
+      cognitoDomain: { domainPrefix: `dropdeck-${stage}-${this.account}` },
+    });
+    const loginOrigins = [siteUrl, ...devOrigins];
     const userPoolClient = new UserPoolClient(this, 'ConsoleClient', {
       userPool,
       generateSecret: false,
-      authFlows: { userSrp: true, userPassword: true },
+      authFlows: { userSrp: true },
+      supportedIdentityProviders: [UserPoolClientIdentityProvider.COGNITO],
+      oAuth: {
+        flows: { authorizationCodeGrant: true },
+        scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
+        callbackUrls: loginOrigins.map((o) => `${o}/m/callback/`),
+        logoutUrls: loginOrigins.map((o) => `${o}/m/`),
+      },
+      accessTokenValidity: Duration.hours(1),
+      idTokenValidity: Duration.hours(1),
+      refreshTokenValidity: Duration.days(30),
     });
 
     // ---- Scheduling ----
@@ -159,6 +181,16 @@ export class DropDeckStack extends Stack {
     bucket.grantPut(merchantFn);
     bucket.grantDelete(merchantFn);
     bucket.grantPut(controllerFn);
+
+    // Signing keys: SecureStrings created by scripts/put-secrets.sh, read once per cold start (shared/secrets).
+    const tokenKey = StringParameter.fromSecureStringParameterAttributes(this, 'TokenKey', { parameterName: `/dropdeck/${stage}/token-key` });
+    const emailHashKey = StringParameter.fromSecureStringParameterAttributes(this, 'EmailHashKey', { parameterName: `/dropdeck/${stage}/email-hash-key` });
+    for (const f of [ticketFn, claimFn, checkoutFn, controllerFn]) {
+      tokenKey.grantRead(f);
+      f.addEnvironment('TOKEN_KEY_PARAM', tokenKey.parameterName);
+    }
+    emailHashKey.grantRead(checkoutFn);
+    checkoutFn.addEnvironment('EMAIL_HASH_KEY_PARAM', emailHashKey.parameterName);
     checkoutFn.addToRolePolicy(new PolicyStatement({ actions: ['ses:SendEmail'], resources: ['*'] }));
 
     const schedulerRole = new Role(this, 'SchedulerRole', { assumedBy: new ServicePrincipal('scheduler.amazonaws.com') });
@@ -170,14 +202,14 @@ export class DropDeckStack extends Stack {
     controllerFn.addEnvironment('SCHEDULE_GROUP', scheduleGroup.name!);
     const scheduleArn = `arn:aws:scheduler:${this.region}:${this.account}:schedule/${scheduleGroup.name}/*`;
     for (const f of [merchantFn, controllerFn]) {
-      f.addToRolePolicy(new PolicyStatement({ actions: ['scheduler:CreateSchedule', 'scheduler:DeleteSchedule', 'scheduler:GetSchedule'], resources: [scheduleArn] }));
+      f.addToRolePolicy(new PolicyStatement({ actions: ['scheduler:CreateSchedule', 'scheduler:UpdateSchedule', 'scheduler:DeleteSchedule', 'scheduler:GetSchedule'], resources: [scheduleArn] }));
       f.addToRolePolicy(new PolicyStatement({ actions: ['iam:PassRole'], resources: [schedulerRole.roleArn] }));
     }
 
     // ---- API ----
     const api = new HttpApi(this, 'Api', {
       corsPreflight: {
-        allowOrigins: [siteUrl, ...props.webOrigins],
+        allowOrigins: [siteUrl, ...devOrigins],
         allowMethods: [CorsHttpMethod.ANY],
         allowHeaders: ['authorization', 'content-type', 'idempotency-key'],
         maxAge: Duration.hours(1),
@@ -212,14 +244,15 @@ export class DropDeckStack extends Stack {
     // ---- Web app (static export) + runtime config ----
     const webOut = path.join(repoRoot, 'apps/web/out');
     const runtimeConfig = Source.jsonData('config.json', {
-      apiUrl: api.apiEndpoint, userPoolId: userPool.userPoolId, userPoolClientId: userPoolClient.userPoolClientId, stage,
+      apiUrl: api.apiEndpoint, userPoolId: userPool.userPoolId, userPoolClientId: userPoolClient.userPoolClientId,
+      authDomain: userPoolDomain.baseUrl(), stage,
     });
     new BucketDeployment(this, 'DeployWeb', {
       destinationBucket: bucket,
       sources: existsSync(webOut) ? [Source.asset(webOut), runtimeConfig] : [runtimeConfig],
       prune: false, // never delete d/* objects written by the services
       distribution,
-      distributionPaths: ['/index.html', '/config.json', '/d/index.html', '/m/index.html'],
+      distributionPaths: ['/index.html', '/config.json', '/d/index.html', '/m/index.html', '/m/callback/index.html'],
     });
 
     // ---- Cost guard ----
@@ -237,6 +270,7 @@ export class DropDeckStack extends Stack {
     new CfnOutput(this, 'ApiUrl', { value: api.apiEndpoint });
     new CfnOutput(this, 'UserPoolId', { value: userPool.userPoolId });
     new CfnOutput(this, 'UserPoolClientId', { value: userPoolClient.userPoolClientId });
+    new CfnOutput(this, 'AuthDomain', { value: userPoolDomain.baseUrl() });
     new CfnOutput(this, 'TableName', { value: table.tableName });
     new CfnOutput(this, 'BucketName', { value: bucket.bucketName });
   }

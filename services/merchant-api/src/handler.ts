@@ -12,6 +12,18 @@ type Event = APIGatewayProxyEventV2WithJWTAuthorizer;
 
 const newId = () => randomBytes(6).toString('base64url').replace(/[-_]/g, 'x').toLowerCase();
 
+/** Fields baked into the open schedule and the stock shards; changing them means unschedule, edit, reschedule. */
+const SCHEDULE_FIELDS: ReadonlyArray<keyof Drop> = ['openAt', 'entryWindowMin', 'variants', 'shardCount'];
+
+/** Undo a half-finished /schedule. Best effort on the side effects; the state flip back is what matters. */
+async function rollbackSchedule(drop: Drop): Promise<void> {
+  const results = await Promise.allSettled([pub.deleteOpenSchedule(drop), pub.deleteDropJson(drop), pub.deleteStateJson(drop)]);
+  for (const r of results) {
+    if (r.status === 'rejected') console.error(JSON.stringify({ level: 'error', msg: 'schedule rollback step failed', err: String(r.reason) }));
+  }
+  await repo.transition(drop, 'Draft');
+}
+
 function tenantOf(event: Event): string {
   const sub = event.requestContext.authorizer?.jwt?.claims?.sub;
   if (typeof sub !== 'string') throw new ApiError('UNAUTHORIZED', 'No merchant identity');
@@ -78,7 +90,12 @@ export async function handler(event: Event) {
         if (locked && touched.some((k) => !ALWAYS_EDITABLE.includes(k))) {
           throw new ApiError('LOCKED_FOR_EDIT', 'Stock, price and times are locked once the entry window opens');
         }
-        const next = await repo.saveDrop({ ...current, ...patch }, current.version);
+        if (current.state === 'Scheduled' && touched.some((k) => SCHEDULE_FIELDS.includes(k))) {
+          throw new ApiError('LOCKED_FOR_EDIT', 'Unschedule the drop to change its times, variants or stock');
+        }
+        const merged = { ...current, ...patch };
+        if (Date.parse(merged.endAt) <= Date.parse(merged.openAt)) throw new ApiError('VALIDATION', 'endAt must be after openAt');
+        const next = await repo.saveDrop(merged, current.version);
         if (next.state === 'Scheduled') await pub.writeDropJson(next, await repo.getProfile(t));
         return json(200, next);
       }
@@ -91,10 +108,19 @@ export async function handler(event: Event) {
         const drop = await repo.getDrop(t, d!);
         if (!canTransition(drop.state, 'Scheduled')) throw new ApiError('INVALID_STATE', `Cannot schedule a ${drop.state} drop`);
         assertSchedulable(drop, new Date());
-        await repo.writeStockShards(drop);
-        await pub.writeDropJson(drop, await repo.getProfile(t));
-        await pub.createOpenSchedule(drop);
-        return json(200, await repo.transition(drop, 'Scheduled'));
+        // Flip the state first: of two concurrent requests only one gets past this conditional write,
+        // so the loser can never roll back the winner's schedule.
+        const scheduled = await repo.transition(drop, 'Scheduled');
+        try {
+          await repo.writeStockShards(scheduled);
+          await pub.writeDropJson(scheduled, await repo.getProfile(t));
+          await pub.writeStateJson(scheduled, 'Scheduled');
+          await pub.createOpenSchedule(scheduled);
+        } catch (e) {
+          await rollbackSchedule(scheduled);
+          throw e;
+        }
+        return json(200, scheduled);
       }
 
       case 'POST /m/drops/{dropId}/unschedule': {
@@ -103,7 +129,7 @@ export async function handler(event: Event) {
           throw new ApiError('LOCKED_FOR_EDIT', 'Only a scheduled drop before its entry window can be unscheduled');
         }
         await pub.deleteOpenSchedule(drop);
-        await pub.deleteDropJson(drop);
+        await Promise.all([pub.deleteDropJson(drop), pub.deleteStateJson(drop)]);
         return json(200, await repo.transition(drop, 'Draft'));
       }
 
@@ -111,8 +137,11 @@ export async function handler(event: Event) {
         const drop = await repo.getDrop(t, d!);
         if (!canTransition(drop.state, 'Cancelled')) throw new ApiError('INVALID_STATE', `Cannot cancel a ${drop.state} drop`);
         await pub.deleteOpenSchedule(drop);
-        // TODO(week 2): the controller publishes state.json with state=Cancelled and voids active holds.
-        return json(200, await repo.transition(drop, 'Cancelled'));
+        const cancelled = await repo.transition(drop, 'Cancelled');
+        // drop.json stays so the page can say the drop was cancelled rather than "not found".
+        // A Live drop's active holds are voided by the controller when it sees the Cancelled state.
+        await pub.writeStateJson(cancelled, 'Cancelled');
+        return json(200, cancelled);
       }
 
       case 'POST /m/drops/{dropId}/duplicate': {

@@ -1,8 +1,6 @@
-export default function Console() {
-  return (
-    <main>
-      <h1>Merchant console</h1>
-      <p className="muted">Sign-in (Cognito), profile and drop editor land in week 1. Until then use the API directly; see README.</p>
-    </main>
-  );
+import Console from './Console';
+
+/** Static page; everything after sign-in happens client-side against the merchant API. */
+export default function ConsolePage() {
+  return <Console />;
 }

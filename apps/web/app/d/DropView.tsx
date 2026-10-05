@@ -22,6 +22,17 @@ const fmt = (ms: number) => {
 
 const price = (cents: number) => `S$${(cents / 100).toFixed(2)}`;
 
+/**
+ * Server time for the clock offset. The object may have been written long ago (a Scheduled drop's state.json is
+ * written once) and then cached, so its serverTime alone can be stale. The origin's Date header plus CloudFront's
+ * Age is when this response was really served; fall back to serverTime where those headers are missing (next dev).
+ */
+function servedAt(r: Response, s: PublicState): number {
+  const date = Date.parse(r.headers.get('date') ?? '');
+  if (Number.isNaN(date)) return Date.parse(s.serverTime);
+  return date + Number(r.headers.get('age') ?? 0) * 1000;
+}
+
 export default function DropView() {
   const ids = useDropPath();
   const [drop, setDrop] = useState<PublicDrop | null>(null);
@@ -49,7 +60,7 @@ export default function DropView() {
         if (r.ok) {
           const s = (await r.json()) as PublicState;
           setState(s);
-          setOffset(Date.parse(s.serverTime) - Date.now());
+          setOffset(servedAt(r, s) - Date.now());
         }
       } catch { /* keep the last state */ }
       if (!stop) setTimeout(tick, POLL_MS);
