@@ -1,5 +1,5 @@
 /**
- * End-to-end smoke test of a deployed stage, in real time (~8 minutes). Exercises what only a deploy can prove:
+ * End-to-end smoke test of a deployed stage, in real time (~9 minutes). Exercises what only a deploy can prove:
  * EventBridge opening a drop, the per-minute tick schedule, the early-group freeze, claims, checkout, a hold
  * expiring back to stock, closing at endAt, and cancelling a Live drop.
  *
@@ -85,7 +85,7 @@ async function main() {
 
   // ---- Set up: profile and two drops opening together (one runs its course, one is cancelled while Live) ----
   check('profile saved', (await merchant('PUT /m/profile', { name: 'E2E Bakery', paynow: '+65 9000 0000' })).status === 200);
-  const openAt = t0 + 210_000; // entry window at +150 s: the 2-minute scheduling lead plus slack
+  const openAt = t0 + 270_000; // entry window at +210 s: the 3-minute scheduling lead plus slack
   const spec = (title: string) => ({
     title, variants: [{ name: 'Loaf', stock: 2, priceCents: 800 }],
     openAt: new Date(openAt).toISOString(), endAt: new Date(openAt + 240_000).toISOString(),
@@ -102,7 +102,7 @@ async function main() {
   check('drop page and drop.json served', page.ok && (await fetch(`${site}/d/${tenant}/${main.dropId}/drop.json`)).ok);
   check('state.json says Scheduled before open', (await state(main.dropId)).state === 'Scheduled');
 
-  // ---- EventBridge opens both a minute ahead of entryOpensAt (OPEN_LEAD_MS), so they are Live in time ----
+  // ---- EventBridge opens both 90 s ahead of entryOpensAt (OPEN_LEAD_MS), so they are Live in time ----
   const entryOpens = openAt - 60_000;
   await sleepUntil(entryOpens - 5_000);
   const early = await buyer(`/api/d/${tenant}/${main.dropId}/ticket`);

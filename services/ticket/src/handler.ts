@@ -64,7 +64,7 @@ export async function handler(event: APIGatewayProxyEventV2) {
       throw new ApiError('NOT_LIVE', drop.state === 'Scheduled' ? 'The queue has not opened yet' : 'This drop is not open');
     }
     if (now > Date.parse(drop.endAt)) throw new ApiError('NOT_LIVE', 'This drop has ended');
-    // The drop goes Live up to a minute early (OPEN_LEAD_MS); nobody joins before the advertised time.
+    // The drop goes Live up to 90 s early (OPEN_LEAD_MS); nobody joins before the advertised time.
     const opens = entryOpensAt(drop).getTime();
     if (now < opens) throw new ApiError('NOT_LIVE', 'The queue has not opened yet', Math.ceil((opens - now) / 1000));
 

@@ -66,7 +66,7 @@ export async function deleteStateJson(drop: Drop): Promise<void> {
 const scheduleName = (drop: Drop) => `open-${drop.dropId}`;
 
 /**
- * One-off schedule a minute before the entry window (OPEN_LEAD_MS); the controller moves the drop to Live.
+ * One-off schedule OPEN_LEAD_MS (90 s) before the entry window; the controller moves the drop to Live.
  * Upserts, so a retried /schedule (or one after a failed rollback) does not trip on ConflictException.
  */
 export async function createOpenSchedule(drop: Drop): Promise<void> {
