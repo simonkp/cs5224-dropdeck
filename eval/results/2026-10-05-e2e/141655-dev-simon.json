@@ -1,0 +1,152 @@
+{
+  "at": "2026-10-05T14:16:55.384Z",
+  "stage": "dev-simon",
+  "tenant": "e2e-d34c3013",
+  "drops": [
+    "ezu239hj",
+    "tahksrln"
+  ],
+  "pass": true,
+  "steps": [
+    {
+      "at": "2s",
+      "step": "profile saved",
+      "ok": true
+    },
+    {
+      "at": "3s",
+      "step": "scheduled E2E main",
+      "ok": true
+    },
+    {
+      "at": "3s",
+      "step": "scheduled E2E cancel",
+      "ok": true
+    },
+    {
+      "at": "3s",
+      "step": "drop page and drop.json served",
+      "ok": true
+    },
+    {
+      "at": "3s",
+      "step": "state.json says Scheduled before open",
+      "ok": true
+    },
+    {
+      "at": "206s",
+      "step": "no tickets before the advertised entry time",
+      "ok": true,
+      "detail": "NOT_LIVE"
+    },
+    {
+      "at": "210s",
+      "step": "E2E main Live by the advertised entry time (scheduler lag absorbed by the lead)",
+      "ok": true,
+      "detail": {
+        "secAfterEntry": 0
+      }
+    },
+    {
+      "at": "210s",
+      "step": "E2E cancel Live by the advertised entry time (scheduler lag absorbed by the lead)",
+      "ok": true,
+      "detail": {
+        "secAfterEntry": 0
+      }
+    },
+    {
+      "at": "211s",
+      "step": "per-minute tick schedule created",
+      "ok": true
+    },
+    {
+      "at": "213s",
+      "step": "early tickets carry a random draw position",
+      "ok": true,
+      "detail": [
+        201,
+        201,
+        201
+      ]
+    },
+    {
+      "at": "213s",
+      "step": "ticket on the drop that will be cancelled",
+      "ok": true
+    },
+    {
+      "at": "303s",
+      "step": "early group frozen at 3",
+      "ok": true
+    },
+    {
+      "at": "339s",
+      "step": "two of three buyers hold the two units; the third is refused sold out",
+      "ok": true,
+      "detail": [
+        "VARIANT_SOLD_OUT",
+        201,
+        201
+      ]
+    },
+    {
+      "at": "339s",
+      "step": "buyer holds a unit on the drop that will be cancelled",
+      "ok": true
+    },
+    {
+      "at": "339s",
+      "step": "merchant cancels a Live drop",
+      "ok": true
+    },
+    {
+      "at": "340s",
+      "step": "page shows Cancelled",
+      "ok": true
+    },
+    {
+      "at": "341s",
+      "step": "checkout refused on the cancelled drop",
+      "ok": true,
+      "detail": "INVALID_STATE"
+    },
+    {
+      "at": "341s",
+      "step": "first holder confirms and sees PayNow details",
+      "ok": true,
+      "detail": "V9D7GR2W"
+    },
+    {
+      "at": "341s",
+      "step": "sold-out flag published",
+      "ok": true
+    },
+    {
+      "at": "427s",
+      "step": "expired hold went back to stock and the flag cleared",
+      "ok": true
+    },
+    {
+      "at": "427s",
+      "step": "the refused buyer now gets the returned unit",
+      "ok": true
+    },
+    {
+      "at": "510s",
+      "step": "drop closed at endAt",
+      "ok": true
+    },
+    {
+      "at": "510s",
+      "step": "tick schedule deleted on close",
+      "ok": true
+    },
+    {
+      "at": "511s",
+      "step": "no new tickets after close",
+      "ok": true,
+      "detail": "NOT_LIVE"
+    }
+  ]
+}
