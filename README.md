@@ -49,6 +49,16 @@ Console against a deployed dev stage from `next dev`: deploy with `-c webOrigins
 (honoured on `dev-*` stages only), copy that stage's `<SiteUrl>/config.json` to `apps/web/public/config.json`
 (git-ignored), then `pnpm --filter web dev`.
 
+Demo data instead of clicking through the console (sign up at `<SiteUrl>/m/` first so the shop is yours):
+
+```bash
+AWS_PROFILE=dropdeck-uni AWS_REGION=ap-southeast-1 pnpm seed -- --stage dev-simon --owner you@example.com --clear
+```
+
+`--clear` wipes the stage's table, published drop files and schedules (dev stages only unless `--force`), then
+loads one shop with a draft, a scheduled drop (opens in `--opens-in` minutes, default 10), a Live drop with
+orders, a closed drop with paid / unpaid / no-show orders, and a cancelled drop. `--no-load` only clears.
+
 ## Guardrails (tested in `infra/test`)
 
 - No VPC, NAT gateway, cache cluster or WAF: nothing bills by the hour.

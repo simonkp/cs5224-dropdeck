@@ -4,31 +4,15 @@ import {
   type CreateScheduleCommandInput,
 } from '@aws-sdk/client-scheduler';
 import {
-  entryOpensAt, OPEN_LEAD_MS, s3Keys, type Drop, type DropState, type MerchantProfile, type PublicDrop, type PublicState,
+  entryOpensAt, OPEN_LEAD_MS, s3Keys, toPublicDrop, type Drop, type DropState, type MerchantProfile, type PublicState,
 } from '@dropdeck/shared';
 import { env } from './env.js';
 
 const s3 = new S3Client({});
 const scheduler = new SchedulerClient({});
 
-export function toPublicDrop(drop: Drop, profile: MerchantProfile | undefined): PublicDrop {
-  return {
-    tenantId: drop.tenantId,
-    dropId: drop.dropId,
-    merchant: { name: profile?.name ?? 'DropDeck merchant', logoUrl: profile?.logoUrl, colour: profile?.colour },
-    title: drop.title,
-    description: drop.description,
-    imageUrl: drop.imageUrl,
-    variants: drop.variants.map(({ id, name, priceCents }) => ({ id, name, priceCents })),
-    openAt: drop.openAt,
-    endAt: drop.endAt,
-    entryOpensAt: entryOpensAt(drop).toISOString(),
-    perBuyerLimit: drop.perBuyerLimit,
-    holdSec: drop.holdSec,
-    admitWindowSec: drop.admitWindowSec,
-    verification: drop.verification,
-  };
-}
+/** Moved to the shared package so the seed script writes exactly what the API writes. */
+export { toPublicDrop } from '@dropdeck/shared';
 
 export async function writeDropJson(drop: Drop, profile: MerchantProfile | undefined): Promise<void> {
   await s3.send(new PutObjectCommand({
