@@ -2,8 +2,19 @@
 
 State of the build on 5 Oct 2026, written for the 19 Oct handover (decision 0010). From then **Liwen and Fung Wei**
 own enhancements, unhappy paths and testing; **Gurbind and Shaowei** own recruitment, the user study and the
-business case; staging's AWS account (and its logs) stays with **Simon**. Read this, then [`api.md`](api.md), [`degradation.md`](degradation.md)
-and the [decision log](decisions/README.md).
+business case.
+
+**For now, staging runs in Simon's AWS account**, so only Simon can open its AWS console and logs. Everyone can
+still deploy staging (push to `main`) and run a full copy in their own account. The team can move staging to
+someone else's account later; both are explained in [Run DropDeck in your own AWS account](#run-dropdeck-in-your-own-aws-account).
+
+Read this, then [`api.md`](api.md), [`degradation.md`](degradation.md) and the [decision log](decisions/README.md).
+
+![DropDeck architecture: the crowd polls the edge; only joins, claims and checkouts reach Lambda](architecture.svg)
+
+Waiting buyers only fetch cached files from CloudFront, so a bigger crowd costs almost nothing at the origin. The
+merchant API writes `drop.json` and the open schedule; the controller writes `state.json` every tick; checkout sends
+email codes (log mode for now). The picture is [`architecture.svg`](architecture.svg), also usable in the report.
 
 ## Where things stand
 
@@ -51,19 +62,26 @@ pnpm test:int           # needs Docker; starts DynamoDB Local on port 8765
 
 ## Environments
 
-| Stage | Account | Site | Deployed by |
+| Stage | AWS account | Site | Deployed by |
 | --- | --- | --- | --- |
-| `staging` | Simon's NUS sandbox `337542796977` | https://d1n4z7b90ypcvj.cloudfront.net | CI, on every push to `main` |
+| `staging` | Simon's NUS sandbox `337542796977` (for now) | https://d1n4z7b90ypcvj.cloudfront.net | CI, on every push to `main` |
 | `dev-simon` | same | https://d1n09y64wfzcgp.cloudfront.net | Simon, by hand |
 | `dev-<you>` | your own NUS sandbox | yours | you |
 
-All stages are in `ap-southeast-1`. The budget alarm (US$10 a month, alerts at $5 and $10 to Simon) watches the
-whole sandbox account. Both stages are in email **log mode**: buyers see their code on screen (see gaps).
+All stages are in `ap-southeast-1`. The budget alarm (US$10 a month, alerts at $5 and $10 to Simon) watches
+Simon's whole sandbox account. Both stages send email codes in **log mode**: buyers see their code on screen (see gaps).
 
-### Your own dev stage
+## Run DropDeck in your own AWS account
 
-Each student has their own Innovation Sandbox account (portal: https://nus-aws-cloud.awsapps.com/start). Add a
-profile to `~/.aws/config` with your account ID from the portal:
+Every student has their own NUS sandbox account (US$50 credit), so anyone can run a complete DropDeck: console,
+buyer page, scheduler, everything. There are two ways to use it.
+
+### A. Your own copy (`dev-<you>`): anyone, any time
+
+**What you need:** the machine set up as above, the [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html),
+and your account ID from the [NUS AWS portal](https://nus-aws-cloud.awsapps.com/start) (Accounts tab).
+
+**1. Tell the AWS CLI about your account.** Add this to `~/.aws/config`, with your own account ID:
 
 ```ini
 [sso-session nus]
@@ -78,25 +96,66 @@ sso_role_name = nusisb_IsbUsersPS
 region = ap-southeast-1
 ```
 
+**2. Log in.** It prints a link and a code; open the link in your browser and approve. Logins last a few hours;
+run it again when commands start saying your token expired.
+
 ```bash
-aws sso login --profile dropdeck --use-device-code --no-browser   # WSL: open the printed link yourself
+aws sso login --profile dropdeck --use-device-code --no-browser
 export AWS_PROFILE=dropdeck AWS_REGION=ap-southeast-1
-cd infra
-npx cdk bootstrap -c allowedAccounts=<your account id>
-../scripts/put-secrets.sh dev-<you>
-pnpm web:build
-npx cdk deploy DropDeck-dev-<you> -c stage=dev-<you> -c allowedAccounts=<your account id> --require-approval never
 ```
 
-The CLI prints "could not be used to assume ... Proceeding anyway": expected, the sandbox forbids assuming the CDK
-roles (decision 0008 amendment). Then sign up at `<SiteUrl>/m/` and load demo data:
+**3. Deploy** (from the repo root; the first time takes about 5 minutes):
 
 ```bash
-pnpm seed -- --stage dev-<you> --owner <your email> --clear
+pnpm web:build
+cd infra
+npx cdk bootstrap -c allowedAccounts=<your account id>          # once per account
+../scripts/put-secrets.sh dev-<you>                              # once per stage
+npx cdk deploy DropDeck-dev-<you> -c stage=dev-<you> -c allowedAccounts=<your account id> --require-approval never
+cd ..
 ```
 
-`npx cdk destroy DropDeck-dev-<you> -c stage=dev-<you>` when you stop for more than a day. Idle cost is near zero,
-but the sandbox is wiped when its lease ends anyway.
+The deploy prints your `SiteUrl`. A line saying "could not be used to assume ... Proceeding anyway" is expected:
+the sandbox does not allow the usual CDK roles, and the deploy works without them (decision 0008 amendment).
+
+**4. Use it.** Open `<SiteUrl>/m/`, create an account, then load a demo shop so you are not typing drops by hand:
+
+```bash
+pnpm seed -- --stage dev-<you> --owner <the email you signed up with> --clear
+```
+
+**5. Tidy up** when you stop for more than a day (idle cost is near zero, but there is no reason to keep it):
+
+```bash
+cd infra && npx cdk destroy DropDeck-dev-<you> -c stage=dev-<you> -c allowedAccounts=<your account id>
+```
+
+Tip: to stop typing `-c allowedAccounts=...`, add your account ID to `allowedAccounts` in `infra/cdk.json` and
+commit it. The list only stops deploys to accounts nobody meant to use.
+
+### B. Move staging to another account: if the team decides to
+
+Staging is whatever CI deploys on a push to `main`, so moving it means pointing CI at a different account. The new
+owner does this once, with option A's steps 1 and 2 done for their account:
+
+1. Add their account ID to `allowedAccounts` in `infra/cdk.json`.
+2. Create the role GitHub deploys with, and the signing keys:
+   ```bash
+   cd infra
+   npx cdk bootstrap -c allowedAccounts=<their account id>
+   npx cdk deploy DropDeck-GithubOidc -c githubRepo=simonkp/cs5224-dropdeck \
+     -c githubSubPrefix=repo:simonkp@5468350/cs5224-dropdeck@1405294986 -c allowedAccounts=<their account id>
+   ../scripts/put-secrets.sh staging
+   ```
+   The `githubSubPrefix` is this repo's GitHub identity; it stays the same whoever owns staging.
+3. In GitHub, set the repository variables (Settings → Secrets and variables → Actions → Variables; needs repo
+   admin, so Simon or a collaborator with admin): `AWS_DEPLOY_ROLE_ARN` = the `DeployRoleArn` the deploy printed,
+   and `BUDGET_EMAIL` = where budget alerts should go.
+4. Commit step 1 and push. CI deploys a fresh staging into the new account. The site URL changes: tell the team and
+   update this doc.
+5. In the old account: `npx cdk destroy DropDeck-staging -c stage=staging`, and optionally `DropDeck-GithubOidc`.
+
+Staging's data (drops, orders) does not move with it; load demo data with `pnpm seed -- --stage staging --owner <email>`.
 
 ## Runbook
 
@@ -110,7 +169,7 @@ but the sandbox is wiped when its lease ends anyway.
 | Oversell experiment | `pnpm --filter @dropdeck/eval oversell -- --stage <stage> --n 500 --m 50` |
 | Logs | CloudWatch Logs `DropDeck-<stage>-<Function>Logs…`; metric lines are listed at the end of `api.md` |
 | Scheduler lag | Logs Insights on the controller: `filter msg = "opened" \| stats max(lagMs)` |
-| Re-deploy the GitHub role | `npx cdk deploy DropDeck-GithubOidc -c githubRepo=simonkp/cs5224-dropdeck -c githubSubPrefix=repo:simonkp@5468350/cs5224-dropdeck@1405294986` (Simon's account) |
+| Re-deploy the GitHub role | `npx cdk deploy DropDeck-GithubOidc -c githubRepo=simonkp/cs5224-dropdeck -c githubSubPrefix=repo:simonkp@5468350/cs5224-dropdeck@1405294986` (staging's account) |
 | Real email | Verify a domain in SES, then deploy with `-c mailFrom="DropDeck <codes@your.domain>"`; for staging, add it to the `cdk deploy` line in `.github/workflows/ci.yml` |
 
 CloudTrail lookups are denied in the sandbox: diagnose from CI logs and Lambda logs.
@@ -142,8 +201,8 @@ and if you change a guard, break it on purpose once to check a test fails.
    `-c resendFallback=true`.
 2. **Sandbox lease.** Unknown end date; the account is wiped at the end. If it ends before marking, staging and
    the cohort drop move to a member's own account (Simon is asking the module staff).
-3. **Only Simon can reach staging's AWS console and logs.** Sandbox accounts are per student. Teammates deploy
-   staging through CI and debug on their own dev stages.
+3. **For now only Simon can see staging's AWS console and logs**, because sandbox accounts are per student. Deploy
+   staging by pushing to `main`, debug on your own copy, or move staging (option B above) if the team prefers.
 4. **Evaluation tooling (Phase 5, Liwen):** k6 load at 1×, 3×, 10× and a ramp; counter ceiling by shard count;
    fairness from the `ticket` log lines (draw on vs off); elasticity at open; cost per drop. Metrics are
    structured log lines today, not CloudWatch metrics (EMF would make dashboards cheap).
