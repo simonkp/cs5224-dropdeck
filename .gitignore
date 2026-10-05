@@ -1,0 +1,9 @@
+node_modules/
+dist/
+cdk.out/
+.next/
+out/
+coverage/
+*.log
+.env*
+!.env.example

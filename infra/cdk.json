@@ -1,0 +1,10 @@
+{
+  "app": "npx tsx bin/app.ts",
+  "context": {
+    "stage": "dev",
+    "budgetUsd": 30,
+    "budgetEmail": "",
+    "githubRepo": "",
+    "webOrigins": ["http://localhost:3000"]
+  }
+}

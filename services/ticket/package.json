@@ -1,0 +1,21 @@
+{
+  "name": "@dropdeck/svc-ticket",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@dropdeck/shared": "workspace:*",
+    "@aws-sdk/client-dynamodb": "^3.1146.0",
+    "@aws-sdk/lib-dynamodb": "^3.1146.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.164",
+    "@types/node": "^22.20.5",
+    "typescript": "~5.9.3",
+    "vitest": "^4.0.0"
+  }
+}
