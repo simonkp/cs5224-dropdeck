@@ -1,5 +1,7 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import {
+  BatchGetCommand, DynamoDBDocumentClient, GetCommand, QueryCommand, UpdateCommand, type BatchGetCommandOutput,
+} from '@aws-sdk/lib-dynamodb';
 import { ApiError } from './errors.js';
 import { keys } from './keys.js';
 import type { Drop, Hold, MerchantProfile } from './types.js';
@@ -103,4 +105,42 @@ export async function releaseHold(
   // A crash here leaks the units (undersell), never oversells.
   await returnUnits(hold.tenantId, hold.dropId, hold.variantId, hold.shard, hold.qty);
   return true;
+}
+
+export async function activeHoldCount(drop: Drop): Promise<number> {
+  const r = await ddb.send(new QueryCommand({
+    TableName: table(),
+    IndexName: 'GSI1',
+    KeyConditionExpression: 'GSI1PK = :pk',
+    ExpressionAttributeValues: { ':pk': keys.holdIndex(drop.tenantId, drop.dropId) },
+    Select: 'COUNT',
+  }));
+  return r.Count ?? 0;
+}
+
+/**
+ * Per-variant units out (held or confirmed), summed over its shards. Live view only: after close, unswept holds
+ * keep counting, so reports must count ORDER# items instead.
+ */
+export async function unitsSold(drop: Drop): Promise<Record<string, number>> {
+  const variantOf = new Map<string, string>();
+  const wanted = drop.variants.flatMap((v) => Array.from({ length: drop.shardCount }, (_, s) => {
+    const k = keys.stockShard(drop.tenantId, drop.dropId, v.id, s);
+    variantOf.set(k.PK, v.id);
+    return k;
+  }));
+  const sold: Record<string, number> = Object.fromEntries(drop.variants.map((v) => [v.id, 0]));
+  for (let i = 0; i < wanted.length; i += 100) {
+    let request: Record<string, { Keys: Record<string, unknown>[] }> | undefined = { [table()]: { Keys: wanted.slice(i, i + 100) } };
+    for (let attempt = 0; request && attempt < 5; attempt++) {
+      const r: BatchGetCommandOutput = await ddb.send(new BatchGetCommand({ RequestItems: request }));
+      for (const item of r.Responses?.[table()] ?? []) {
+        const variantId = variantOf.get(String(item.PK));
+        if (variantId) sold[variantId] = (sold[variantId] ?? 0) + Number(item.sold ?? 0);
+      }
+      request = r.UnprocessedKeys && Object.keys(r.UnprocessedKeys).length ? (r.UnprocessedKeys as typeof request) : undefined;
+      if (request) await new Promise((res) => setTimeout(res, 50 * 2 ** attempt));
+    }
+  }
+  return sold;
 }

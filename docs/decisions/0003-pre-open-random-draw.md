@@ -19,6 +19,8 @@ Buyers may join from the entry window (default 15 min before open) until open pl
 
 ## Consequences
 
+The controller closes a drop at its end time, or as soon as every variant is gone and no hold is open, which is at most one hold window after the last sale and immediate when every hold is confirmed (the preliminary plan said "one hold window after the last sell-out").
+
 Ticket load spreads over the entry window. The fairness experiment compares draw on and off. The peak becomes less sharp, so the cost comparison must use the measured peak, not the 1000:1 headline.
 
 ## Change from the preliminary report

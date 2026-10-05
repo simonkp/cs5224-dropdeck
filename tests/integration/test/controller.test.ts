@@ -49,7 +49,9 @@ describe.skipIf(!enabled)('controller tick against DynamoDB Local', () => {
     vi.clearAllMocks();
   });
 
-  it('concurrent controllers return an expired hold’s units exactly once and leave live holds alone', async () => {
+  // DynamoDB Local serialises requests, so these ticks barely overlap; the race itself is proven by the direct
+  // concurrent releaseHold test in buyer-path.test.ts and the stale-read test below.
+  it('repeated controller ticks return an expired hold’s units once and leave live holds alone', async () => {
     const drop = await liveDrop();
     const stale = await hold(drop, 2);
     const fresh = await hold(drop, 1);
