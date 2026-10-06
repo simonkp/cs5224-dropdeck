@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PublicDrop, PublicState } from '@dropdeck/shared';
-import { buyerApi, BuyerApiError, loadSession, queueStatus, saveSession, type BuyerSession, type Confirmation } from './buyer';
+import { buyerApi, BuyerApiError, ClockEstimate, loadSession, queueStatus, saveSession, type BuyerSession, type Confirmation } from './buyer';
 
 const POLL_MS = 2000;
 
@@ -27,22 +27,12 @@ const fmtShort = (ms: number) => {
 
 const price = (cents: number) => `S$${(cents / 100).toFixed(2)}`;
 
-/**
- * Server time for the clock offset. The object may have been written long ago (a Scheduled drop's state.json is
- * written once) and then cached, so its serverTime alone can be stale. The origin's Date header plus CloudFront's
- * Age is when this response was really served; fall back to serverTime where those headers are missing (next dev).
- */
-function servedAt(r: Response, s: PublicState): number {
-  const date = Date.parse(r.headers.get('date') ?? '');
-  if (Number.isNaN(date)) return Date.parse(s.serverTime);
-  return date + Number(r.headers.get('age') ?? 0) * 1000;
-}
-
 export default function DropView() {
   const ids = useDropPath();
   const [drop, setDrop] = useState<PublicDrop | null>(null);
   const [state, setState] = useState<PublicState | null>(null);
   const [offset, setOffset] = useState(0); // server clock minus device clock
+  const clock = useRef(new ClockEstimate());
   const [now, setNow] = useState(() => Date.now());
   const [error, setError] = useState<string | null>(null);
 
@@ -61,13 +51,16 @@ export default function DropView() {
     let stop = false;
     const tick = async () => {
       try {
+        const sentAt = Date.now();
         const r = await fetch(`/d/${ids.t}/${ids.d}/state.json`);
+        const receivedAt = Date.now();
         if (r.ok) {
           const s = (await r.json()) as PublicState;
           setState(s);
-          // The Date header has 1 s resolution; ignore sub-1.5 s wobble so the countdown does not jitter.
-          const next = servedAt(r, s) - Date.now();
-          setOffset((prev) => (Math.abs(next - prev) > 1500 ? next : prev));
+          // The Date + Age headers say when this copy was really served (a Scheduled drop's state.json is written
+          // once and cached, so its serverTime is stale); without them (next dev) fall back to serverTime.
+          clock.current.add(r.headers.get('date'), r.headers.get('age'), sentAt, receivedAt);
+          setOffset(Math.round(clock.current.ready ? clock.current.offset() : Date.parse(s.serverTime) - receivedAt));
         }
       } catch { /* keep the last state */ }
       if (!stop) setTimeout(tick, POLL_MS);
@@ -151,8 +144,18 @@ function Buyer({ ids, drop, state, serverNow }: { ids: { t: string; d: string };
     setBusy(true);
     setNotice(null);
     try {
-      const r = await buyerApi<{ ticket: string; r?: number; n?: number }>(`/api/d/${ids.t}/${ids.d}/ticket`);
-      setSession({ stage: 'queued', ticket: r.ticket, r: r.r, n: r.n });
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const r = await buyerApi<{ ticket: string; r?: number; n?: number }>(`/api/d/${ids.t}/${ids.d}/ticket`);
+          setSession({ stage: 'queued', ticket: r.ticket, r: r.r, n: r.n });
+          return;
+        } catch (e) {
+          // Tapped a moment before the queue opened on the server: wait as told and try again. The random extra
+          // delay spreads a crowd of early taps instead of having them all retry in the same instant.
+          if (!(e instanceof BuyerApiError && e.code === 'NOT_LIVE' && e.retryAfter && e.retryAfter <= 10 && attempt < 3)) throw e;
+          await new Promise((res) => setTimeout(res, e.retryAfter! * 1000 + Math.random() * 1000));
+        }
+      }
     } catch (e) {
       setNotice(e instanceof Error ? e.message : String(e));
     } finally {

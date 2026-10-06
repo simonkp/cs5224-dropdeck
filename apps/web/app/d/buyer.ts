@@ -70,3 +70,51 @@ export function queueStatus(pos: { r?: number; n?: number }, s: PublicState | nu
   const earlyLeft = s.rThreshold >= 1 ? 0 : Math.ceil(early * (1 - s.rThreshold));
   return { admitted: n < s.nWatermark, ahead: earlyLeft + Math.max(0, n - s.nWatermark + 1) };
 }
+
+/**
+ * The server clock, estimated from state.json responses. A Date header is cut to the whole second, so one response
+ * only says the server time was within a 1–2 s window when it was served (the Age header adds its own second). Polls
+ * land at different points of the second, so intersecting the windows from every poll narrows the offset to well
+ * under a second after a few polls. If the windows ever disagree (the device clock jumped), start again from the
+ * latest one.
+ */
+export class ClockEstimate {
+  private lo = -Infinity;
+  private hi = Infinity;
+
+  /** `sentAt` and `receivedAt` are device times (Date.now()) around the request. */
+  add(date: string | null, age: string | null, sentAt: number, receivedAt: number): void {
+    const d = Date.parse(date ?? '');
+    if (Number.isNaN(d)) return;
+    const a = Number(age);
+    const hasAge = age !== null && Number.isFinite(a);
+    const serverLow = d + (hasAge ? a * 1000 : 0);
+    const serverHigh = serverLow + (hasAge ? 2000 : 1000);
+    // Served somewhere between sending and receiving, at a server time inside [serverLow, serverHigh).
+    const lo = serverLow - receivedAt;
+    const hi = serverHigh - sentAt;
+    const nlo = Math.max(this.lo, lo);
+    const nhi = Math.min(this.hi, hi);
+    if (nlo > nhi) {
+      this.lo = lo;
+      this.hi = hi;
+    } else {
+      this.lo = nlo;
+      this.hi = nhi;
+    }
+  }
+
+  get ready(): boolean {
+    return Number.isFinite(this.lo) && Number.isFinite(this.hi);
+  }
+
+  /** Server clock minus device clock, in ms. */
+  offset(): number {
+    return (this.lo + this.hi) / 2;
+  }
+
+  /** How uncertain the offset still is, in ms. */
+  width(): number {
+    return this.hi - this.lo;
+  }
+}
