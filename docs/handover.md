@@ -9,6 +9,7 @@ still deploy staging (push to `main`) and run a full copy in their own account. 
 someone else's account later; both are explained in [Run DropDeck in your own AWS account](#run-dropdeck-in-your-own-aws-account).
 
 Read this, then [`api.md`](api.md), [`degradation.md`](degradation.md) and the [decision log](decisions/README.md).
+New to AWS or CloudFormation? Start with [`aws-guide.md`](aws-guide.md).
 
 ![DropDeck architecture: the crowd polls the edge; only joins, claims and checkouts reach Lambda](architecture.svg)
 
