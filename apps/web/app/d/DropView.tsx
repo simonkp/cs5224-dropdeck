@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PublicDrop, PublicState } from '@dropdeck/shared';
-import { buyerApi, BuyerApiError, ClockEstimate, loadSession, queueStatus, saveSession, type BuyerSession, type Confirmation } from './buyer';
+import {
+  buyerApi, BuyerApiError, ClockEstimate, loadDetails, loadSession, queueStatus, saveDetails, saveSession,
+  type BuyerDetails, type BuyerSession, type Confirmation,
+} from './buyer';
 
 const POLL_MS = 2000;
 
@@ -260,6 +263,7 @@ function Queued(props: {
         )}
         <p className="muted">This page updates by itself. Refreshing will not move you forward or back.</p>
         {notice && <p className="muted">{notice}</p>}
+        <DetailsWhileWaiting />
       </>
     );
   }
@@ -294,6 +298,27 @@ function Queued(props: {
   );
 }
 
+/** Optional: fill checkout in while waiting. Saved in this browser only; sent nowhere until an order is confirmed. */
+function DetailsWhileWaiting() {
+  const [d, setD] = useState<BuyerDetails>(() => loadDetails());
+  const update = (patch: Partial<BuyerDetails>) => setD((cur) => {
+    const next = { ...cur, ...patch };
+    saveDetails(next);
+    return next;
+  });
+  return (
+    <div className="form waiting-details">
+      <p><strong>While you wait</strong> <span className="muted">(optional): your details for checkout, so it takes one tap when it is your turn.</span></p>
+      <label>Name<input maxLength={80} value={d.name} onChange={(e) => update({ name: e.target.value })} autoComplete="name" /></label>
+      <label>Email<input type="email" value={d.email} onChange={(e) => update({ email: e.target.value })} autoComplete="email" /></label>
+      <small className="muted">
+        Kept only in this browser and used for this and your next drops; nothing is sent until you order.{' '}
+        {(d.name || d.email) && <button type="button" className="link" onClick={() => update({ name: '', email: '' })}>Forget my details</button>}
+      </small>
+    </div>
+  );
+}
+
 function Held(props: {
   session: Extract<BuyerSession, { stage: 'held' }>;
   drop: PublicDrop;
@@ -303,8 +328,11 @@ function Held(props: {
 }) {
   const { session, drop, serverNow } = props;
   const needsCode = drop.verification === 'email';
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
+  // Pre-filled from what the buyer typed while waiting; edits here are remembered the same way.
+  const [name, setNameState] = useState(() => loadDetails().name);
+  const [email, setEmailState] = useState(() => loadDetails().email);
+  const setName = (v: string) => { setNameState(v); saveDetails({ name: v, email }); };
+  const setEmail = (v: string) => { setEmailState(v); saveDetails({ name, email: v }); };
   const [code, setCode] = useState('');
   const [sent, setSent] = useState<{ to: string; at: number; resendAfterSec: number; devCode?: string } | null>(null);
   const [busy, setBusy] = useState(false);

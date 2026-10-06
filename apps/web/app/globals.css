@@ -49,3 +49,5 @@ table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 td select { font: inherit; padding: 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+.waiting-details { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+button.link { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }

@@ -34,6 +34,34 @@ export function saveSession(t: string, d: string, s: BuyerSession | null): void 
   } catch { /* private mode: the session lasts as long as the tab */ }
 }
 
+/**
+ * Name and email typed while waiting, so checkout is one tap when the turn comes. Kept only in this browser (and for
+ * the buyer's next drop): nothing is sent until they confirm an order, so people who never get stock leave no
+ * personal data with us (decision 0001).
+ */
+export interface BuyerDetails {
+  name: string;
+  email: string;
+}
+
+const DETAILS_KEY = 'dd.buyer.details';
+
+export function loadDetails(): BuyerDetails {
+  try {
+    const d = JSON.parse(localStorage.getItem(DETAILS_KEY) ?? 'null') as Partial<BuyerDetails> | null;
+    return { name: typeof d?.name === 'string' ? d.name : '', email: typeof d?.email === 'string' ? d.email : '' };
+  } catch {
+    return { name: '', email: '' };
+  }
+}
+
+export function saveDetails(d: BuyerDetails): void {
+  try {
+    if (d.name || d.email) localStorage.setItem(DETAILS_KEY, JSON.stringify({ name: d.name.slice(0, 80), email: d.email.slice(0, 200) }));
+    else localStorage.removeItem(DETAILS_KEY);
+  } catch { /* private mode: details last as long as the page */ }
+}
+
 export class BuyerApiError extends Error {
   constructor(public readonly status: number, public readonly code: string, message: string, public readonly retryAfter?: number) {
     super(message);

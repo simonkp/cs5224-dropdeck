@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { admittedAt, admittedCount, watermark, type PublicState } from '@dropdeck/shared';
-import { ClockEstimate, queueStatus } from './buyer';
+import { ClockEstimate, loadDetails, queueStatus, saveDetails } from './buyer';
 
 const state = (admitted: number, early: number): PublicState => ({
   state: 'Live', serverTime: '', ...watermark(admitted, early), earlyCount: early, soldOut: {},
@@ -63,5 +63,26 @@ describe('ClockEstimate', () => {
     const est = new ClockEstimate();
     est.add(null, null, 0, 10);
     expect(est.ready).toBe(false);
+  });
+});
+
+describe('buyer details kept in the browser', () => {
+  const store = new Map<string, string>();
+  const ls = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) };
+
+  it('round-trips, trims to the field limits, and forgets when both fields are cleared', () => {
+    Object.assign(globalThis, { localStorage: ls });
+    saveDetails({ name: 'Ann Lee', email: 'ann@example.com' });
+    expect(loadDetails()).toEqual({ name: 'Ann Lee', email: 'ann@example.com' });
+    saveDetails({ name: 'x'.repeat(100), email: '' });
+    expect(loadDetails().name).toHaveLength(80);
+    saveDetails({ name: '', email: '' });
+    expect(store.size).toBe(0);
+  });
+
+  it('copes with no storage at all (private mode)', () => {
+    Object.assign(globalThis, { localStorage: undefined });
+    expect(loadDetails()).toEqual({ name: '', email: '' });
+    expect(() => saveDetails({ name: 'a', email: 'b' })).not.toThrow();
   });
 });
