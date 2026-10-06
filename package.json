@@ -12,6 +12,7 @@
     "synth": "pnpm --filter infra synth",
     "web:build": "pnpm --filter web build",
     "test:int": "scripts/test-int.sh",
-    "seed": "pnpm --filter @dropdeck/eval seed"
+    "seed": "pnpm --filter @dropdeck/eval seed",
+    "demo:reset": "scripts/demo-reset.sh"
   }
 }

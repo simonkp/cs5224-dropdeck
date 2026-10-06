@@ -52,15 +52,26 @@ Console against a deployed dev stage from `next dev`: deploy with `-c webOrigins
 (honoured on `dev-*` stages only), copy that stage's `<SiteUrl>/config.json` to `apps/web/public/config.json`
 (git-ignored), then `pnpm --filter web dev`.
 
-Demo data instead of clicking through the console (sign up at `<SiteUrl>/m/` first so the shop is yours):
+Demo data instead of clicking through the console (sign up at `<SiteUrl>/m/` first so the shop is yours). Before a
+demo or test session, reset the stage and get a fresh list of links:
+
+```bash
+pnpm demo:reset -- dev-simon            # signs you in to AWS if needed, wipes, seeds, prints the test links
+pnpm demo:reset -- dev-simon you@example.com --opens-in 5
+```
+
+It runs the seed below with `--clear`, picks the stage's console user as the owner when there is only one, and uses
+`AWS_PROFILE=dropdeck-uni` unless you set another. The seed on its own:
 
 ```bash
 AWS_PROFILE=dropdeck-uni AWS_REGION=ap-southeast-1 pnpm seed -- --stage dev-simon --owner you@example.com --clear
 ```
 
-`--clear` wipes the stage's table, published drop files and schedules (dev stages only unless `--force`), then
-loads one shop with a draft, a scheduled drop (opens in `--opens-in` minutes, default 10), a Live drop with
-orders, a closed drop with paid / unpaid / no-show orders, and a cancelled drop. `--no-load` only clears.
+`--clear` wipes the stage's table, published drop files, shop pages, uploaded images and schedules (dev stages only
+unless `--force`), then loads one shop with a draft, a scheduled drop (opens in `--opens-in` minutes, default 10), a
+Live drop with orders, a closed drop with paid / unpaid / no-show orders, and a cancelled drop. It also loads two
+more branded shops (Kopi Lab, dark; Hue Ceramics, light) with a countdown drop each, to show other brands side by
+side. Photos and logos come from `eval/assets/seed` (sources in `CREDITS.md`). `--no-load` only clears.
 
 ## Guardrails (tested in `infra/test`)
 

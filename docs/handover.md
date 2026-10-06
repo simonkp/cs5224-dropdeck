@@ -122,8 +122,10 @@ the sandbox does not allow the usual CDK roles, and the deploy works without the
 **4. Use it.** Open `<SiteUrl>/m/`, create an account, then load a demo shop so you are not typing drops by hand:
 
 ```bash
-pnpm seed -- --stage dev-<you> --owner <the email you signed up with> --clear
+pnpm demo:reset -- dev-<you>   # wipes the stage, loads three demo shops, prints the links to test with
 ```
+
+Run it again before each demo to start from a clean slate.
 
 **5. Tidy up** when you stop for more than a day (idle cost is near zero, but there is no reason to keep it):
 
@@ -165,6 +167,7 @@ Staging's data (drops, orders) does not move with it; load demo data with `pnpm 
 | Deploy staging | Merge to `main`. CI runs typecheck, tests, web build, synth, integration, then deploys and smoke-tests |
 | Deploy a dev stage | `npx cdk deploy DropDeck-<stage> -c stage=<stage>` from `infra` (after `pnpm web:build`) |
 | Signing keys for a new stage | `scripts/put-secrets.sh <stage>`, once, before the first deploy |
+| Reset for a demo | `pnpm demo:reset -- <stage> [owner-email] [--opens-in N]`: AWS sign-in if needed, wipe, seed, print links (non-dev stages need `FORCE=1`) |
 | Demo data | `pnpm seed -- --stage <stage> --owner <email> [--clear] [--opens-in N]` (`--clear` refuses non-dev stages without `--force`) |
 | Lifecycle smoke test (~9 min) | `pnpm --filter @dropdeck/eval e2e -- --stage <stage>` |
 | Oversell experiment | `pnpm --filter @dropdeck/eval oversell -- --stage <stage> --n 500 --m 50` |
@@ -213,7 +216,7 @@ and if you change a guard, break it on purpose once to check a test fails.
    (needs WAF, which bills by the hour), Turnstile. Extra sessions buy better odds, not more orders.
 7. **Merchant sign-up is open** to anyone with an email. Pricing tiers (decision 0007) are not enforced; `tier`
    is always `starter`.
-8. **Small things:** no image upload (URL only), no refunds or order edits beyond status, the console has no
+8. **Small things:** no refunds or order edits beyond status, uploaded images are never cleaned up, the console has no
    pagination for very large order lists, and `PATCH` on a Scheduled drop cannot move its time (unschedule first,
    by design).
 
