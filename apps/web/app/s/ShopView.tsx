@@ -1,11 +1,11 @@
 'use client';
 
 import type { PublicShop, PublicShopDrop } from '@dropdeck/shared';
-import { ArrowRight, CalendarPlus, SearchX, Store, Upload } from 'lucide-react';
+import { ArrowRight, CalendarPlus, ChevronRight, SearchX, Store, Upload } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { BrandArt, ShopLogo, useDocumentBrand } from '../../components/brand';
 import { Badge, LiveDot } from '../../components/ui/badge';
-import { Button } from '../../components/ui/button';
+import { Button, buttonVariants } from '../../components/ui/button';
 import { Card, SectionTitle } from '../../components/ui/card';
 import { Skeleton } from '../../components/ui/skeleton';
 import { downloadIcs } from '../../lib/calendar';
@@ -33,18 +33,29 @@ function addToCalendar(d: PublicShopDrop, shopName: string) {
   );
 }
 
+/**
+ * A drop tile is one big link: the title's link is stretched over the whole card (its ::after covers it), and the
+ * calendar button sits above that layer so it keeps its own job. Hover lifts the card and zooms the photo; a press
+ * dips it, so it reads as tappable on phones too.
+ */
+const tile = 'group relative transition-[transform,box-shadow,border-color] duration-200 hover:-translate-y-0.5 hover:border-brand-text/40 hover:shadow-[0_12px_32px_rgba(16,17,20,0.12)] active:translate-y-0 active:scale-[0.99] has-[a:focus-visible]:outline-2 has-[a:focus-visible]:outline-offset-2 has-[a:focus-visible]:outline-brand-text motion-reduce:transition-none motion-reduce:hover:translate-y-0';
+const stretched = 'no-underline outline-none after:absolute after:inset-0 after:z-[1] after:rounded-3xl after:content-[""]';
+
 function LiveCard({ d }: { d: PublicShopDrop }) {
   return (
-    <Card className="flex flex-col overflow-hidden p-0">
+    <Card className={cn(tile, 'flex flex-col overflow-hidden p-0')}>
       <BrandArt src={d.imageUrl} label={d.title} className="h-40 sm:h-44">
         <Badge tone="live" className="absolute top-3 left-3"><LiveDot />LIVE</Badge>
       </BrandArt>
       <div className="flex flex-1 flex-col gap-3 p-4">
         <div className="flex flex-1 flex-col gap-1">
-          <h3 className="font-display text-[22px] leading-tight font-bold">{d.title}</h3>
+          <h3 className="font-display text-[22px] leading-tight font-bold">
+            <a href={d.url} className={cn(stretched, 'text-ink group-hover:underline group-hover:underline-offset-4')}>{d.title}</a>
+          </h3>
           <span className="text-sm text-muted">Queue open · draw at {time(d.openAt)} · from {price(d.fromPriceCents)}</span>
         </div>
-        <Button size="lg" className="w-full" asChild><a href={d.url}>Join the queue<ArrowRight strokeWidth={2.4} /></a></Button>
+        {/* Looks like a button; the whole card is the link, so this is decoration for the eye, not a second tab stop. */}
+        <span aria-hidden className={cn(buttonVariants({ size: 'lg' }), 'w-full')}>Join the queue<ArrowRight strokeWidth={2.4} className="transition-transform group-hover:translate-x-1" /></span>
       </div>
     </Card>
   );
@@ -53,7 +64,7 @@ function LiveCard({ d }: { d: PublicShopDrop }) {
 function UpcomingCard({ d, shopName }: { d: PublicShopDrop; shopName: string }) {
   const b = dateBlock(d.openAt);
   return (
-    <Card className="flex items-center gap-3 p-3 sm:flex-col sm:items-stretch sm:gap-0 sm:overflow-hidden sm:p-0">
+    <Card className={cn(tile, 'flex items-center gap-3 p-3 sm:flex-col sm:items-stretch sm:gap-0 sm:overflow-hidden sm:p-0')}>
       <BrandArt src={d.imageUrl} label={d.title} className="hidden h-44 sm:block">
         <Badge tone="brand" className="absolute top-3 left-3 bg-surface">{dayTime(d.entryOpensAt).toUpperCase()}</Badge>
       </BrandArt>
@@ -61,12 +72,16 @@ function UpcomingCard({ d, shopName }: { d: PublicShopDrop; shopName: string }) 
         <span className="text-[11px] font-extrabold tracking-wider">{b.dow}</span>
         <span className="font-display text-[22px] leading-none font-extrabold">{b.date}</span>
       </span>
-      <a href={d.url} className="flex min-w-0 flex-1 flex-col gap-0.5 text-ink no-underline sm:p-4 sm:pb-2">
-        <span className="truncate text-base font-bold sm:font-display sm:text-[22px] sm:leading-tight">{d.title}</span>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:p-4 sm:pb-3">
+        <a href={d.url} className={cn(stretched, 'block truncate text-base font-bold text-ink group-hover:underline group-hover:underline-offset-4 sm:font-display sm:text-[22px] sm:leading-tight')}>{d.title}</a>
         <span className="text-[13px] text-muted sm:text-sm">Queue opens {time(d.entryOpensAt)} · from {price(d.fromPriceCents)}</span>
-      </a>
-      <Button variant="outline" size="icon" className="sm:hidden" aria-label={`Add ${d.title} to calendar`} onClick={() => addToCalendar(d, shopName)}><CalendarPlus /></Button>
-      <div className="hidden px-4 pb-4 sm:block">
+        <span aria-hidden className="mt-1.5 hidden items-center gap-1 text-sm font-bold text-brand-text sm:inline-flex">
+          View drop<ArrowRight className="size-4 transition-transform group-hover:translate-x-1" strokeWidth={2.4} />
+        </span>
+      </div>
+      <Button variant="outline" size="icon" className="relative z-[2] sm:hidden" aria-label={`Add ${d.title} to calendar`} onClick={() => addToCalendar(d, shopName)}><CalendarPlus /></Button>
+      <ChevronRight aria-hidden className="-ml-1 size-5 shrink-0 text-muted transition-transform group-hover:translate-x-0.5 sm:hidden" />
+      <div className="relative z-[2] hidden px-4 pb-4 sm:block">
         <Button variant="outline" size="lg" className="w-full" onClick={() => addToCalendar(d, shopName)}><CalendarPlus />Add to calendar</Button>
       </div>
     </Card>

@@ -65,7 +65,7 @@ export function BrandArt(props: { src?: string; className?: string; label?: stri
   return (
     <div className={cn('relative overflow-hidden bg-brand', props.className)}>
       {src ? (
-        <img src={src} alt={props.label ?? ''} className="absolute inset-0 size-full object-cover" />
+        <img src={src} alt={props.label ?? ''} className="absolute inset-0 size-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.04] motion-reduce:transition-none" />
       ) : (
         <div aria-hidden>
           <div className="absolute -top-[90px] -left-[60px] size-[260px] rounded-full bg-brand-art" />
