@@ -3,6 +3,8 @@ export type VerificationMode = 'off' | 'email';
 export type RatePreset = 'gentle' | 'normal' | 'fast';
 export type HoldState = 'active' | 'confirmed' | 'released';
 export type OrderStatus = 'confirmed' | 'paid' | 'no-show';
+/** How a merchant's buyer pages are themed; 'auto' follows each buyer's phone setting. */
+export type ThemeMode = 'light' | 'dark' | 'auto';
 
 export interface Variant {
   id: string;
@@ -15,14 +17,26 @@ export interface Variant {
 export interface MerchantProfile {
   tenantId: string;
   name: string;
+  /** Unique across merchants (a SLUG# item guards it); the public shop page lives at /s/{slug}/. */
   slug: string;
+  /** Root-relative path of an image this merchant uploaded (/b/{tenantId}/...). */
   logoUrl?: string;
+  /** Brand colour, lowercase #rrggbb. */
   colour?: string;
+  theme?: ThemeMode;
+  /** Shop banner, an uploaded image path like logoUrl. */
+  coverUrl?: string;
+  tagline?: string;
   /** PayNow mobile number or UEN shown on confirmation. */
   paynow?: string;
   fulfilmentNote?: string;
   tier: 'starter' | 'growth' | 'event';
+  /** Set once the slug is held by this tenant's SLUG# item; only then is s/{slug}/shop.json published. */
+  slugClaimed?: boolean;
 }
+
+/** The branding every public page carries. `slug` is present only once the shop page exists. */
+export type PublicMerchant = Pick<MerchantProfile, 'name' | 'logoUrl' | 'colour' | 'theme' | 'coverUrl' | 'tagline'> & { slug?: string };
 
 export interface Drop {
   tenantId: string;
@@ -57,7 +71,7 @@ export interface Drop {
 export interface PublicDrop {
   tenantId: string;
   dropId: string;
-  merchant: Pick<MerchantProfile, 'name' | 'logoUrl' | 'colour'>;
+  merchant: PublicMerchant;
   title: string;
   description: string;
   imageUrl?: string;
@@ -70,6 +84,28 @@ export interface PublicDrop {
   /** Seconds an admitted buyer has to claim; the page shows it as a countdown. */
   admitWindowSec: number;
   verification: VerificationMode;
+}
+
+/** One drop as listed on the public shop page. */
+export interface PublicShopDrop {
+  dropId: string;
+  /** Root-relative link to the drop page. */
+  url: string;
+  title: string;
+  imageUrl?: string;
+  state: 'Scheduled' | 'Live' | 'Closed';
+  entryOpensAt: string;
+  openAt: string;
+  endAt: string;
+  fromPriceCents: number;
+}
+
+/** Written to s/{slug}/shop.json whenever the profile or one of the merchant's drops changes. */
+export interface PublicShop {
+  tenantId: string;
+  merchant: PublicMerchant;
+  generatedAt: string;
+  drops: PublicShopDrop[];
 }
 
 /** Written to state.json by the controller; buyers poll it from CloudFront. */

@@ -1,12 +1,12 @@
 import type { Context } from 'aws-lambda';
 import { QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import {
-  admissionStartsAt, admittedCount, dropAdmissionRate, entryOpensAt, FREEZE_DELAY_MS, keys, OPEN_LEAD_MS, watermark,
-  type Drop, type PublicState,
+  admissionStartsAt, admittedCount, dropAdmissionRate, entryOpensAt, FREEZE_DELAY_MS, keys, OPEN_LEAD_MS, toPublicShop,
+  watermark, type Drop, type PublicState,
 } from '@dropdeck/shared';
-import { ddb, getDrop, isConditionFailure, table } from '@dropdeck/shared/ddb';
+import { ddb, getDrop, getProfile, isConditionFailure, listDrops, table } from '@dropdeck/shared/ddb';
 import { activeHoldCount, closeDrop, soldOutFlags, sweepExpired, unitsSold, voidActiveHolds } from './ops.js';
-import { writeState } from './publish.js';
+import { writeShopJson, writeState } from './publish.js';
 import { deleteTickSchedule, upsertTickSchedule } from './schedule.js';
 
 /**
@@ -33,6 +33,21 @@ const RUN_MS = 55_000;
 
 const log = (msg: string, extra: Record<string, unknown> = {}) => console.log(JSON.stringify({ level: 'info', msg, ...extra }));
 
+/**
+ * Best effort: a failed shop page refresh must never stop a drop opening or closing. `changed` is the drop just moved,
+ * laid over the list because the query can still return its previous state for a moment.
+ */
+async function refreshShop(t: string, changed: Drop): Promise<void> {
+  try {
+    const profile = await getProfile(t);
+    if (!profile?.slugClaimed) return;
+    const drops = (await listDrops(t)).map((x) => (x.dropId === changed.dropId ? changed : x));
+    await writeShopJson(profile.slug, toPublicShop(profile, drops));
+  } catch (e) {
+    console.error(JSON.stringify({ level: 'error', msg: 'shop.json refresh failed', t, err: String(e) }));
+  }
+}
+
 async function open(t: string, d: string, controllerArn: string): Promise<boolean> {
   let drop = await getDrop(t, d);
   if (drop.state === 'Scheduled') {
@@ -49,6 +64,7 @@ async function open(t: string, d: string, controllerArn: string): Promise<boolea
       // Scheduler lag is an evaluation number: how late the open fired against when it was scheduled.
       const scheduledFor = entryOpensAt(drop).getTime() - OPEN_LEAD_MS;
       log('opened', { t, d, lagMs: Date.now() - scheduledFor, msBeforeEntry: entryOpensAt(drop).getTime() - Date.now() });
+      await refreshShop(t, drop);
     } catch (e) {
       if (!isConditionFailure(e)) throw e;
       drop = await getDrop(t, d); // another invocation won, or the merchant cancelled
@@ -101,6 +117,7 @@ async function finish(drop: Drop, nowMs: number, soldOut?: Record<string, boolea
     state: drop.state, serverTime: new Date(nowMs).toISOString(), rThreshold: 0, nWatermark: 0,
     earlyCount: drop.earlyCount ?? null, soldOut: soldOut ?? soldOutFlags(drop, await unitsSold(drop)),
   });
+  await refreshShop(drop.tenantId, drop);
   await deleteTickSchedule(drop);
 }
 

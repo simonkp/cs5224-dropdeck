@@ -1,6 +1,7 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
-  BatchWriteCommand, DeleteCommand, DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, UpdateCommand,
+  BatchWriteCommand, DeleteCommand, DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, TransactWriteCommand,
+  UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { ApiError, keys, type Drop, type DropState, type MerchantProfile, type Order, type OrderStatus } from '@dropdeck/shared';
 import { env } from './env.js';
@@ -21,19 +22,85 @@ export async function getProfile(t: string): Promise<MerchantProfile | undefined
   return strip<MerchantProfile>(r.Item);
 }
 
-export async function putProfile(p: MerchantProfile): Promise<void> {
-  await ddb.send(new PutCommand({ TableName: env.table(), Item: { ...keys.profile(p.tenantId), type: 'Profile', ...p } }));
+/**
+ * Save the profile and hold its slug in one transaction: claim SLUG#{new} (unless another tenant has it), write the
+ * profile (only if nobody changed its slug since we read it), and free SLUG#{old} when the slug moved. Every save
+ * re-claims the slug, which also backfills the SLUG# item for profiles saved before slugs were unique.
+ */
+export async function saveProfile(next: MerchantProfile, prev: MerchantProfile | undefined): Promise<MerchantProfile> {
+  const t = next.tenantId;
+  const saved: MerchantProfile = { ...next, slugClaimed: true };
+  const moved = prev !== undefined && prev.slug !== next.slug;
+  try {
+    await ddb.send(new TransactWriteCommand({
+      TransactItems: [
+        {
+          Put: {
+            TableName: env.table(),
+            Item: { ...keys.slug(next.slug), type: 'Slug', tenantId: t },
+            ConditionExpression: 'attribute_not_exists(PK) OR tenantId = :t',
+            ExpressionAttributeValues: { ':t': t },
+          },
+        },
+        {
+          Put: {
+            TableName: env.table(),
+            Item: { ...keys.profile(t), type: 'Profile', ...saved },
+            ...(prev
+              ? { ConditionExpression: 'slug = :prev', ExpressionAttributeValues: { ':prev': prev.slug } }
+              : { ConditionExpression: 'attribute_not_exists(PK)' }),
+          },
+        },
+        ...(moved
+          ? [{
+            Delete: {
+              TableName: env.table(),
+              Key: keys.slug(prev.slug),
+              ConditionExpression: 'attribute_not_exists(PK) OR tenantId = :t',
+              ExpressionAttributeValues: { ':t': t },
+            },
+          }]
+          : []),
+      ],
+    }));
+  } catch (e) {
+    const reasons = (e as { name?: string; CancellationReasons?: Array<{ Code?: string }> });
+    if (reasons.name === 'TransactionCanceledException') {
+      if (reasons.CancellationReasons?.[0]?.Code === 'ConditionalCheckFailed') throw new ApiError('SLUG_TAKEN', 'That shop link is taken; try another');
+      throw new ApiError('INVALID_STATE', 'Your shop profile changed since it was loaded; reload and try again');
+    }
+    throw e;
+  }
+  return saved;
 }
 
-export async function listDrops(t: string): Promise<Drop[]> {
-  const k = keys.dropPrefix(t);
-  const r = await ddb.send(new QueryCommand({
-    TableName: env.table(),
-    KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
-    ExpressionAttributeValues: { ':pk': k.PK, ':sk': k.SKPrefix },
-  }));
-  return (r.Items ?? []).map((i) => strip<Drop>(i)!).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+/** Who holds a slug, if anyone. */
+export async function slugOwner(slug: string): Promise<string | undefined> {
+  const r = await ddb.send(new GetCommand({ TableName: env.table(), Key: keys.slug(slug) }));
+  return r.Item?.tenantId as string | undefined;
 }
+
+export const UPLOADS_PER_DAY = 100;
+
+/** Count one image upload against today's allowance; RATE_LIMITED once it is used up. */
+export async function bumpUploadQuota(t: string, now = new Date()): Promise<void> {
+  try {
+    await ddb.send(new UpdateCommand({
+      TableName: env.table(),
+      Key: keys.uploadQuota(t, now.toISOString().slice(0, 10)),
+      UpdateExpression: 'ADD n :one SET #type = :type, #ttl = :ttl',
+      ConditionExpression: 'attribute_not_exists(n) OR n < :max',
+      ExpressionAttributeNames: { '#type': 'type', '#ttl': 'ttl' },
+      ExpressionAttributeValues: { ':one': 1, ':max': UPLOADS_PER_DAY, ':type': 'UploadQuota', ':ttl': Math.floor(now.getTime() / 1000) + 2 * 86400 },
+    }));
+  } catch (e) {
+    if (isConditionFailure(e)) throw new ApiError('RATE_LIMITED', `Up to ${UPLOADS_PER_DAY} image uploads a day; try again tomorrow`, 3600);
+    throw e;
+  }
+}
+
+/** Shared with the controller, which rebuilds shop.json when a drop opens or closes. */
+export { listDrops } from '@dropdeck/shared/ddb';
 
 export async function getDrop(t: string, d: string): Promise<Drop> {
   const r = await ddb.send(new GetCommand({ TableName: env.table(), Key: keys.drop(t, d) }));

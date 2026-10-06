@@ -13,7 +13,7 @@ export interface Confirmation {
   variantName: string;
   qty: number;
   amountCents: number;
-  merchant: { name: string; paynow?: string; fulfilmentNote?: string };
+  merchant: { name: string; paynow?: string; fulfilmentNote?: string; logoUrl?: string; colour?: string; theme?: 'light' | 'dark' | 'auto' };
 }
 
 const storageKey = (t: string, d: string) => `dd.buyer.${t}.${d}`;

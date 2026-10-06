@@ -1,4 +1,7 @@
-import { ApiError, type Drop, type RatePreset, type Variant, type VerificationMode } from '@dropdeck/shared';
+import {
+  ApiError, COLOUR_RE, slugProblem, TAGLINE_MAX, THEMES, uploadPathRe,
+  type Drop, type MerchantProfile, type RatePreset, type Variant, type VerificationMode,
+} from '@dropdeck/shared';
 
 export type DropInput = Pick<
   Drop,
@@ -61,15 +64,27 @@ function variants(v: unknown): Variant[] {
   });
 }
 
-/** Full validation for create; `partial` validates only the fields present (PATCH). */
-export function validateDropInput(body: Record<string, unknown>, partial = false): Partial<DropInput> {
+/**
+ * A drop image is one this tenant uploaded (/b/{t}/...), or, for drops made before uploads existed, an https URL.
+ * '' or null clears it (the key stays in the result with an undefined value, so a PATCH removes the image).
+ */
+function imageUrl(v: unknown, t: string | undefined): string | undefined {
+  if (v === null || v === '') return undefined;
+  const s = str(v, 'imageUrl', 1, 500);
+  if (t && uploadPathRe(t).test(s)) return s;
+  if (/^https:\/\/[^\s"'<>]+$/.test(s)) return s;
+  return fail('imageUrl must be an uploaded image or an https link');
+}
+
+/** Full validation for create; `partial` validates only the fields present (PATCH). `t` is the caller's tenant. */
+export function validateDropInput(body: Record<string, unknown>, partial = false, t?: string): Partial<DropInput> {
   const out: Partial<DropInput> = {};
   const has = (k: string) => body[k] !== undefined;
   const req = (k: string) => !partial || has(k);
 
   if (req('title')) out.title = str(body.title, 'title', 1, 120);
   if (has('description')) out.description = str(body.description, 'description', 0, 2000);
-  if (has('imageUrl')) out.imageUrl = str(body.imageUrl, 'imageUrl', 1, 500);
+  if (body.imageUrl !== undefined) out.imageUrl = imageUrl(body.imageUrl, t);
   if (req('variants')) out.variants = variants(body.variants);
   if (req('openAt')) out.openAt = iso(body.openAt, 'openAt');
   if (req('endAt')) out.endAt = iso(body.endAt, 'endAt');
@@ -87,6 +102,43 @@ export function validateDropInput(body: Record<string, unknown>, partial = false
     if (span <= 0) fail('endAt must be after openAt');
     if (span > 24 * 3600_000) fail('a drop can last at most 24 hours');
   }
+  return out;
+}
+
+type ProfileField = 'name' | 'slug' | 'logoUrl' | 'coverUrl' | 'colour' | 'theme' | 'tagline' | 'paynow' | 'fulfilmentNote';
+
+/** PUT /m/profile body. A field left out keeps its value; null (or '') clears an optional field. */
+export type ProfilePatch = { [K in ProfileField]?: MerchantProfile[K] | null };
+
+export function validateProfileInput(body: Record<string, unknown>, t: string): ProfilePatch {
+  const out: ProfilePatch = {};
+  const clear = (k: ProfileField) => body[k] === null || body[k] === '';
+  const optional = (k: ProfileField, check: (v: unknown) => string) => {
+    if (body[k] === undefined) return;
+    (out as Record<string, unknown>)[k] = clear(k) ? null : check(body[k]);
+  };
+  const image = (name: string) => (v: unknown) => {
+    const s = str(v, name, 1, 300);
+    return uploadPathRe(t).test(s) ? s : fail(`${name} must be an image uploaded to your shop`);
+  };
+
+  if (body.name !== undefined) out.name = str(body.name, 'name', 1, 80);
+  if (body.slug !== undefined) {
+    const slug = str(body.slug, 'slug', 1, 40).toLowerCase();
+    const problem = slugProblem(slug);
+    if (problem) fail(`Shop link: ${problem}`);
+    out.slug = slug;
+  }
+  optional('logoUrl', image('logoUrl'));
+  optional('coverUrl', image('coverUrl'));
+  optional('colour', (v) => {
+    const c = str(v, 'colour', 7, 7).toLowerCase();
+    return COLOUR_RE.test(c) ? c : fail('colour must look like #1f6feb');
+  });
+  optional('theme', (v) => oneOf(v, 'theme', THEMES));
+  optional('tagline', (v) => str(v, 'tagline', 1, TAGLINE_MAX));
+  optional('paynow', (v) => str(v, 'paynow', 1, 40));
+  optional('fulfilmentNote', (v) => str(v, 'fulfilmentNote', 1, 300));
   return out;
 }
 

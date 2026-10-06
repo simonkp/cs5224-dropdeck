@@ -4,9 +4,12 @@ import {
   type CreateScheduleCommandInput,
 } from '@aws-sdk/client-scheduler';
 import {
-  entryOpensAt, OPEN_LEAD_MS, s3Keys, toPublicDrop, type Drop, type DropState, type MerchantProfile, type PublicState,
+  entryOpensAt, OPEN_LEAD_MS, s3Keys, toPublicDrop, toPublicShop, type Drop, type DropState, type MerchantProfile,
+  type PublicState,
 } from '@dropdeck/shared';
 import { env } from './env.js';
+import type { DecodedImage } from './images.js';
+import * as repo from './repo.js';
 
 const s3 = new S3Client({});
 const scheduler = new SchedulerClient({});
@@ -26,6 +29,69 @@ export async function writeDropJson(drop: Drop, profile: MerchantProfile | undef
 
 export async function deleteDropJson(drop: Drop): Promise<void> {
   await s3.send(new DeleteObjectCommand({ Bucket: env.bucket(), Key: s3Keys.dropJson(drop.tenantId, drop.dropId) }));
+}
+
+/** Uploaded images are content-addressed and never overwritten with different bytes, so they cache for a year. */
+export async function putImage(t: string, img: DecodedImage): Promise<string> {
+  const key = s3Keys.image(t, img.hash, img.ext);
+  await s3.send(new PutObjectCommand({
+    Bucket: env.bucket(),
+    Key: key,
+    Body: img.bytes,
+    ContentType: img.contentType,
+    CacheControl: 'public, max-age=31536000, immutable',
+  }));
+  return `/${key}`;
+}
+
+export async function writeShopJson(profile: MerchantProfile, drops: Drop[]): Promise<void> {
+  if (!profile.slugClaimed) return;
+  await s3.send(new PutObjectCommand({
+    Bucket: env.bucket(),
+    Key: s3Keys.shopJson(profile.slug),
+    Body: JSON.stringify(toPublicShop(profile, drops)),
+    ContentType: 'application/json',
+    CacheControl: 'public, max-age=30',
+  }));
+}
+
+export async function deleteShopJson(slug: string): Promise<void> {
+  await s3.send(new DeleteObjectCommand({ Bucket: env.bucket(), Key: s3Keys.shopJson(slug) }));
+}
+
+const warn = (msg: string, err: unknown, extra: Record<string, unknown> = {}) =>
+  console.error(JSON.stringify({ level: 'error', msg, err: String(err), ...extra }));
+
+/**
+ * Rebuild the shop page after a drop changes. Best effort: the drop change has already happened, and the next change
+ * (or the controller opening or closing the drop) writes the file again. `changed` is laid over the listed drops,
+ * since the query can still return its previous version for a moment.
+ */
+export async function refreshShop(t: string, changed: Drop): Promise<void> {
+  try {
+    const profile = await repo.getProfile(t);
+    if (!profile?.slugClaimed) return;
+    const drops = (await repo.listDrops(t)).map((x) => (x.dropId === changed.dropId ? changed : x));
+    await writeShopJson(profile, drops);
+  } catch (e) {
+    warn('shop.json refresh failed', e, { t });
+  }
+}
+
+/** New branding reaches drop pages that are already published (Scheduled or Live). Returns how many failed. */
+export async function republishBranding(profile: MerchantProfile, drops: Drop[]): Promise<number> {
+  const published = drops.filter((d) => d.state === 'Scheduled' || d.state === 'Live');
+  let failed = 0;
+  for (let i = 0; i < published.length; i += 5) {
+    const results = await Promise.allSettled(published.slice(i, i + 5).map((d) => writeDropJson(d, profile)));
+    for (const r of results) {
+      if (r.status === 'rejected') {
+        failed++;
+        warn('drop.json republish failed', r.reason, { t: profile.tenantId });
+      }
+    }
+  }
+  return failed;
 }
 
 /** Pre-open (or terminal) state. Once Live, the controller owns state.json and rewrites it every tick. */

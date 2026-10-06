@@ -25,6 +25,21 @@ describe('drop validation', () => {
   });
 });
 
+describe('drop image', () => {
+  const own = '/b/tenant-1/0123456789abcdef0123456789abcdef.webp';
+  it('accepts an image the tenant uploaded, a legacy https link, and clearing it', () => {
+    expect(validateDropInput({ imageUrl: own }, true, 'tenant-1').imageUrl).toBe(own);
+    expect(validateDropInput({ imageUrl: 'https://cdn.example/loaf.jpg' }, true, 'tenant-1').imageUrl).toBe('https://cdn.example/loaf.jpg');
+    const cleared = validateDropInput({ imageUrl: null }, true, 'tenant-1');
+    expect('imageUrl' in cleared && cleared.imageUrl === undefined).toBe(true);
+  });
+  it('refuses http, javascript and another tenant\'s upload', () => {
+    for (const imageUrl of ['http://cdn.example/a.jpg', 'javascript:alert(1)', '/b/tenant-2/0123456789abcdef0123456789abcdef.png']) {
+      expect(() => validateDropInput({ imageUrl }, true, 'tenant-1'), imageUrl).toThrow(ApiError);
+    }
+  });
+});
+
 describe('scheduling', () => {
   const drop = { ...validateDropInput(valid), entryWindowMin: 15, state: 'Draft' } as never;
   it('requires three minutes of lead time before the entry window', () => {

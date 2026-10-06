@@ -8,7 +8,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./secrets": "./src/secrets.ts",
-    "./ddb": "./src/ddb.ts"
+    "./ddb": "./src/ddb.ts",
+    "./branding": "./src/branding.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

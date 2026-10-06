@@ -1,14 +1,15 @@
 import type { APIGatewayProxyEventV2WithJWTAuthorizer } from 'aws-lambda';
 import { randomBytes } from 'node:crypto';
 import {
-  ALWAYS_EDITABLE, ApiError, canTransition, errorResult, isLockedForEdit, json, parseBody,
+  ALWAYS_EDITABLE, ApiError, canTransition, errorResult, isLockedForEdit, json, parseBody, slugProblem,
   type Drop, type MerchantProfile,
 } from '@dropdeck/shared';
 import * as repo from './repo.js';
 import * as pub from './publish.js';
 import { buildReport, ordersCsv } from './reports.js';
 import { activeHoldCount, unitsSold } from '@dropdeck/shared/ddb';
-import { assertSchedulable, DEFAULTS, validateDropInput } from './validate.js';
+import { decodeImage } from './images.js';
+import { assertSchedulable, DEFAULTS, validateDropInput, validateProfileInput } from './validate.js';
 
 type Event = APIGatewayProxyEventV2WithJWTAuthorizer;
 
@@ -43,26 +44,49 @@ export async function handler(event: Event) {
         return json(200, (await repo.getProfile(t)) ?? null);
 
       case 'PUT /m/profile': {
-        const b = body();
-        const profile: MerchantProfile = {
-          tenantId: t,
-          name: String(b.name ?? '').slice(0, 80) || 'My shop',
-          slug: String(b.slug ?? '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 40) || t.slice(0, 8),
-          logoUrl: typeof b.logoUrl === 'string' ? b.logoUrl : undefined,
-          colour: typeof b.colour === 'string' ? b.colour : undefined,
-          paynow: typeof b.paynow === 'string' ? b.paynow : undefined,
-          fulfilmentNote: typeof b.fulfilmentNote === 'string' ? b.fulfilmentNote.slice(0, 300) : undefined,
-          tier: 'starter',
-        };
-        await repo.putProfile(profile);
-        return json(200, profile);
+        // A merge: fields left out keep their value, null clears one. The tier is never the merchant's to set.
+        const patch = validateProfileInput(body(), t);
+        const cur = await repo.getProfile(t);
+        // Without a chosen slug, the tenant ID itself: unique by construction (the console always sends one).
+        const fallbackSlug = t.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 40);
+        const next: MerchantProfile = { name: 'My shop', slug: fallbackSlug, theme: 'auto', ...cur, tenantId: t, tier: cur?.tier ?? 'starter' };
+        for (const [k, v] of Object.entries(patch)) {
+          if (v === null) delete (next as unknown as Record<string, unknown>)[k];
+          else (next as unknown as Record<string, unknown>)[k] = v;
+        }
+        const saved = await repo.saveProfile(next, cur);
+        // New branding reaches pages already out there; a moved slug takes the old shop page down.
+        const drops = await repo.listDrops(t);
+        await Promise.all([
+          pub.republishBranding(saved, drops),
+          pub.writeShopJson(saved, drops).catch((e) => console.error(JSON.stringify({ level: 'error', msg: 'shop.json write failed', err: String(e) }))),
+          cur?.slugClaimed && cur.slug !== saved.slug
+            ? pub.deleteShopJson(cur.slug).catch((e) => console.error(JSON.stringify({ level: 'error', msg: 'old shop.json delete failed', err: String(e) })))
+            : undefined,
+        ]);
+        return json(200, saved);
+      }
+
+      case 'GET /m/slugs/{slug}': {
+        const slug = String(event.pathParameters?.slug ?? '').toLowerCase();
+        const problem = slugProblem(slug);
+        const owner = problem ? undefined : await repo.slugOwner(slug);
+        const taken = owner !== undefined && owner !== t;
+        return json(200, { slug, available: !problem && !taken, problem: problem ?? (taken ? 'That shop link is taken' : null) });
+      }
+
+      case 'POST /m/uploads': {
+        const img = decodeImage(body().image);
+        await repo.bumpUploadQuota(t);
+        const path = await pub.putImage(t, img);
+        return json(201, { path, contentType: img.contentType, bytes: img.bytes.length });
       }
 
       case 'GET /m/drops':
         return json(200, await repo.listDrops(t));
 
       case 'POST /m/drops': {
-        const input = validateDropInput(body());
+        const input = validateDropInput(body(), false, t);
         const now = new Date().toISOString();
         const drop: Drop = {
           ...DEFAULTS,
@@ -83,7 +107,7 @@ export async function handler(event: Event) {
 
       case 'PATCH /m/drops/{dropId}': {
         const current = await repo.getDrop(t, d!);
-        const patch = validateDropInput(body(), true);
+        const patch = validateDropInput(body(), true, t);
         const locked = isLockedForEdit(current, new Date());
         const touched = Object.keys(patch) as (keyof Drop)[];
         if (current.state === 'Closed' || current.state === 'Cancelled' || current.state === 'Live') {
@@ -98,7 +122,10 @@ export async function handler(event: Event) {
         const merged = { ...current, ...patch };
         if (Date.parse(merged.endAt) <= Date.parse(merged.openAt)) throw new ApiError('VALIDATION', 'endAt must be after openAt');
         const next = await repo.saveDrop(merged, current.version);
-        if (next.state === 'Scheduled') await pub.writeDropJson(next, await repo.getProfile(t));
+        if (next.state === 'Scheduled') {
+          await pub.writeDropJson(next, await repo.getProfile(t));
+          await pub.refreshShop(t, next);
+        }
         return json(200, next);
       }
 
@@ -122,6 +149,7 @@ export async function handler(event: Event) {
           await rollbackSchedule(scheduled);
           throw e;
         }
+        await pub.refreshShop(t, scheduled);
         return json(200, scheduled);
       }
 
@@ -132,7 +160,9 @@ export async function handler(event: Event) {
         }
         await pub.deleteOpenSchedule(drop);
         await Promise.all([pub.deleteDropJson(drop), pub.deleteStateJson(drop)]);
-        return json(200, await repo.transition(drop, 'Draft'));
+        const draft = await repo.transition(drop, 'Draft');
+        await pub.refreshShop(t, draft);
+        return json(200, draft);
       }
 
       case 'POST /m/drops/{dropId}/cancel': {
@@ -143,6 +173,7 @@ export async function handler(event: Event) {
         // drop.json stays so the page can say the drop was cancelled rather than "not found".
         // A Live drop's active holds are voided by the controller when it sees the Cancelled state.
         await pub.writeStateJson(cancelled, 'Cancelled');
+        await pub.refreshShop(t, cancelled);
         return json(200, cancelled);
       }
 
@@ -209,7 +240,7 @@ export async function handler(event: Event) {
 
 /** Routes registered in infra; keep in sync with the switch above. */
 export const ROUTES = [
-  'GET /m/profile', 'PUT /m/profile',
+  'GET /m/profile', 'PUT /m/profile', 'GET /m/slugs/{slug}', 'POST /m/uploads',
   'GET /m/drops', 'POST /m/drops',
   'GET /m/drops/{dropId}', 'PATCH /m/drops/{dropId}', 'DELETE /m/drops/{dropId}',
   'POST /m/drops/{dropId}/schedule', 'POST /m/drops/{dropId}/unschedule',

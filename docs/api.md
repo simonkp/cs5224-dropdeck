@@ -23,11 +23,12 @@ Every error body is `{ code, message, retryAfter? }` (`retryAfter` in seconds). 
 | `VARIANT_SOLD_OUT` | 409 | No shard has the quantity left |
 | `LIMIT_REACHED` | 409 | This email already has an order for this drop |
 | `LOCKED_FOR_EDIT` | 409 | Field cannot change in the drop's current state |
-| `INVALID_STATE` | 409 | Lifecycle conflict (e.g. scheduling a non-draft, checkout on a cancelled drop) |
+| `INVALID_STATE` | 409 | Lifecycle conflict (e.g. scheduling a non-draft, checkout on a cancelled drop), or the profile changed since it was read |
+| `SLUG_TAKEN` | 409 | Another shop already has that shop link |
 | `ADMISSION_EXPIRED` | 410 | The ticket's claim window has passed; join again |
 | `HOLD_EXPIRED` | 410 | The hold ran out or was released |
 | `OTP_LOCKED` | 429 | Five wrong codes, or three codes sent, for this hold |
-| `RATE_LIMITED` | 429 | Code requested again within 30 s |
+| `RATE_LIMITED` | 429 | Code requested again within 30 s, or the day's 100 image uploads are used up |
 | `NOT_IMPLEMENTED` | 501 | Unused since Phase 4 |
 
 `SOLD_OUT` and `TENANT_BUDGET` are reserved and not returned today.
@@ -36,13 +37,26 @@ Every error body is `{ code, message, retryAfter? }` (`retryAfter` in seconds). 
 
 | Path | Cache | Written by |
 | --- | --- | --- |
-| `/config.json` | invalidated on deploy | CDK: `{ apiUrl, userPoolId, userPoolClientId, authDomain, stage, mailMode }` |
+| `/config.json` | invalidated on deploy | CDK: `{ apiUrl, userPoolId, userPoolClientId, authDomain, stage, mailMode, siteUrl }` |
 | `/d/{tenantId}/{dropId}/` | static page | Next.js export, rewritten to `/d/index.html` |
-| `/d/{tenantId}/{dropId}/drop.json` | 30 s (max 60) | merchant API on schedule and on edits |
+| `/d/{tenantId}/{dropId}/drop.json` | 30 s (max 60) | merchant API on schedule, on edits, and on every profile save (Scheduled and Live drops) |
 | `/d/{tenantId}/{dropId}/state.json` | 2 s (1–5) | merchant API before open and on cancel; controller every tick while Live |
+| `/s/{slug}/` | static page | Next.js export, rewritten to `/s/index.html` |
+| `/s/{slug}/shop.json` | 30 s (max 60) | merchant API on profile save, schedule, unschedule, cancel and edits of Scheduled drops; controller on open and close |
+| `/b/{tenantId}/{hash}.{png,jpg,webp}` | 1 year, immutable | `POST /m/uploads`; content-addressed, never overwritten |
 
-`drop.json` (`PublicDrop`): `tenantId, dropId, merchant{name, logoUrl?, colour?}, title, description, imageUrl?,
-variants[{id, name, priceCents}], openAt, endAt, entryOpensAt, perBuyerLimit, holdSec, admitWindowSec, verification`.
+A missing file is `403` (S3 behind origin access control), not `404`; pages treat both as "not found".
+
+`drop.json` (`PublicDrop`): `tenantId, dropId, merchant{name, slug?, logoUrl?, colour?, theme, coverUrl?, tagline?},
+title, description, imageUrl?, variants[{id, name, priceCents}], openAt, endAt, entryOpensAt, perBuyerLimit, holdSec,
+admitWindowSec, verification`. `merchant.slug` is present once the shop page exists. Image fields are root-relative
+paths (`/b/...`); resolve them against `siteUrl` when the page runs elsewhere (`next dev`). Closed and Cancelled drops
+keep the branding they were published with.
+
+`shop.json` (`PublicShop`): `tenantId, merchant{...as above}, generatedAt, drops[{dropId, url, title, imageUrl?,
+state: Scheduled | Live | Closed, entryOpensAt, openAt, endAt, fromPriceCents}]`: Live first, then up to 20
+Scheduled soonest first, then up to 6 drops closed in the last 30 days, newest first. Drafts and cancelled drops never
+appear. The file can be a minute old, so show a Scheduled drop as live once its `entryOpensAt` has passed.
 
 `state.json` (`PublicState`): `state, serverTime, rThreshold (0..1), nWatermark, earlyCount (null until frozen),
 soldOut{variantId: bool}`. A buyer with draw position `r` is admitted when `earlyCount !== null && r <= rThreshold`;
@@ -87,7 +101,7 @@ mode (no sender configured). Errors: `LIMIT_REACHED` (address already ordered; n
 
 `{ name, email, code? }` (`code` required when verification is `email`; the email must be the one the current
 code went to). `200 { state: "confirmed", orderRef, dropTitle, variantName, qty, amountCents,
-merchant{name, paynow?, fulfilmentNote?} }`. Idempotent: a retry returns the same order. Errors:
+merchant{name, paynow?, fulfilmentNote?, logoUrl?, colour?, theme?} }`. Idempotent: a retry returns the same order. Errors:
 `OTP_INVALID`, `OTP_LOCKED`, `LIMIT_REACHED` (the hold is released), `HOLD_EXPIRED`, `INVALID_STATE` (cancelled),
 `VALIDATION`. A Closed drop still accepts confirms for holds that have not expired.
 
@@ -99,7 +113,9 @@ key is scoped to it, so another merchant's drop is `NOT_FOUND`.
 | Route | Body | Returns |
 | --- | --- | --- |
 | `GET /m/profile` | | `MerchantProfile` or `null` |
-| `PUT /m/profile` | `{ name, slug?, logoUrl?, colour?, paynow?, fulfilmentNote? }` | profile |
+| `PUT /m/profile` | `{ name?, slug?, logoUrl?, coverUrl?, colour?, theme?, tagline?, paynow?, fulfilmentNote? }` | profile; see profile rules |
+| `GET /m/slugs/{slug}` | | `{ slug, available, problem }`; `available` is true when the link is free or already yours |
+| `POST /m/uploads` | `{ image: base64 or data URL }` | `201 { path: "/b/{tenantId}/{hash}.{ext}", contentType, bytes }` |
 | `GET /m/drops` | | `Drop[]`, newest first |
 | `POST /m/drops` | drop fields (below) | `201 Drop` (Draft) |
 | `GET /m/drops/{dropId}` | | `Drop` |
@@ -115,8 +131,19 @@ key is scoped to it, so another merchant's drop is `NOT_FOUND`.
 | `GET /m/drops/{dropId}/export.csv` | | CSV: `ref,name,email,variant,qty,unit_price_sgd,amount_sgd,status,ordered_at` |
 | `GET /m/drops/{dropId}/report` | | `{ stock, orders, units{ordered, paid, unpaid, noShow}, revenueCents{ordered, paid, outstanding}, sellThrough, firstOrderAt, soldOutAt, secondsToSellOut, byVariant[], queue }` |
 
+Profile rules (`validateProfileInput`): a merge, so a field left out keeps its value and `null` (or `""`) clears it;
+`tier` is never taken from the body. `name` 1–80; `slug` 3–40 of `a-z 0-9 -`, starting and ending with a letter or
+digit, not reserved (`admin`, `api`, `m`, `d`, `s`, `b`, …), unique across shops (`SLUG_TAKEN`); `colour` `#rrggbb`
+(stored lowercase); `theme` light | dark | auto (auto); `tagline` ≤ 140; `logoUrl` and `coverUrl` must be images this
+merchant uploaded (`/b/{tenantId}/…`); `paynow` ≤ 40; `fulfilmentNote` ≤ 300. A save republishes `drop.json` for the
+shop's Scheduled and Live drops and rewrites `shop.json` (deleting the old one when the slug moves); pages pick it up
+within about a minute.
+
+Uploads: PNG, JPEG or WebP, checked from the bytes (never SVG or GIF), at most 1 MiB decoded. The console shrinks
+images in the browser first. 100 uploads per merchant per day (`RATE_LIMITED`).
+
 Drop fields and limits (`services/merchant-api/src/validate.ts`): `title` 1–120 (required), `description` ≤ 2000,
-`imageUrl`, `variants` 1–10 of `{ id?, name 1–60, stock 1–10000, priceCents 0–10000000 }` (required), `openAt`,
+`imageUrl` (an image this merchant uploaded, a legacy `https://` link, or `null` to remove it), `variants` 1–10 of `{ id?, name 1–60, stock 1–10000, priceCents 0–10000000 }` (required), `openAt`,
 `endAt` (required; at most 24 h apart), `entryWindowMin` 0–60 (15), `graceSec` 0–120 (30), `perBuyerLimit` 1–10 (2),
 `holdSec` 120–900 (300), `admitWindowSec` 30–600 (120), `ratePreset` gentle | normal | fast (normal),
 `verification` off | email (email), `shardCount` 1–16 (4).
@@ -133,8 +160,8 @@ orders only: after close, unswept holds keep counters high (docs/degradation.md)
 
 | Event | When | Does |
 | --- | --- | --- |
-| `{ action: "open", tenantId, dropId }` | one-off, 90 s before `entryOpensAt` | Scheduled → Live, creates `tick-{dropId}` (rate 1 min), then ticks |
-| `{ action: "tick", tenantId, dropId }` | every minute while Live | ~55 s loop, a tick every 2.5 s: freeze early group, publish watermark and sold-out flags, sweep expired holds, close at `endAt` or when sold and settled; finish Closed / Cancelled drops |
+| `{ action: "open", tenantId, dropId }` | one-off, 90 s before `entryOpensAt` | Scheduled → Live, rebuilds `shop.json`, creates `tick-{dropId}` (rate 1 min), then ticks |
+| `{ action: "tick", tenantId, dropId }` | every minute while Live | ~55 s loop, a tick every 2.5 s: freeze early group, publish watermark and sold-out flags, sweep expired holds, close at `endAt` or when sold and settled; finish Closed / Cancelled drops (which also rebuilds `shop.json`) |
 
 Log lines worth querying in CloudWatch Logs Insights: `metric: "ticket"` (arrival, r or n, block, instance),
 `metric: "claim"`, `metric: "order"`, and controller `msg: "opened"` (`lagMs`), `"early group frozen"`,

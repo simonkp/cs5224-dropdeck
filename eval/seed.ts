@@ -15,7 +15,10 @@
  * a Live drop with orders that the controller is started on; a closed drop with paid, unpaid and no-show
  * orders; and a cancelled drop. Buyer emails are @example.com.
  */
-import { randomBytes, randomInt } from 'node:crypto';
+import { createHash, randomBytes, randomInt } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { CloudFormationClient, DescribeStacksCommand, ListStackResourcesCommand } from '@aws-sdk/client-cloudformation';
 import { CognitoIdentityProviderClient, ListUsersCommand } from '@aws-sdk/client-cognito-identity-provider';
@@ -25,7 +28,7 @@ import { DeleteObjectsCommand, ListObjectsV2Command, PutObjectCommand, S3Client 
 import { DeleteScheduleCommand, ListSchedulesCommand, SchedulerClient } from '@aws-sdk/client-scheduler';
 import { BatchWriteCommand, DynamoDBDocumentClient, PutCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
 import {
-  keys, s3Keys, shardCapacities, toPublicDrop, type Drop, type DropState, type MerchantProfile, type Order, type OrderStatus,
+  keys, s3Keys, shardCapacities, toPublicDrop, toPublicShop, type Drop, type DropState, type MerchantProfile, type Order, type OrderStatus,
   type PublicState, type Variant,
 } from '@dropdeck/shared';
 
@@ -94,16 +97,23 @@ async function clear(st: Stack) {
   } while (start);
 
   let objects = 0;
-  let token: string | undefined;
-  do {
-    const r = await s3.send(new ListObjectsV2Command({ Bucket: st.bucket, Prefix: 'd/', ContinuationToken: token }));
-    const keysToDelete = (r.Contents ?? []).map((o) => ({ Key: o.Key! }));
-    // Keep the page itself (d/index.html and the export's d/ files); only per-drop folders are data.
-    const data = keysToDelete.filter((k) => /^d\/[^/]+\/[^/]+\/(drop|state)\.json$/.test(k.Key));
-    if (data.length) await s3.send(new DeleteObjectsCommand({ Bucket: st.bucket, Delete: { Objects: data } }));
-    objects += data.length;
-    token = r.NextContinuationToken;
-  } while (token);
+  // Keep the pages themselves (d/index.html, s/index.html and the export's files); only the services' files are data:
+  // per-drop JSON, per-shop JSON and uploaded images.
+  const dataFiles: Array<[string, RegExp]> = [
+    ['d/', /^d\/[^/]+\/[^/]+\/(drop|state)\.json$/],
+    ['s/', /^s\/[^/]+\/shop\.json$/],
+    ['b/', /^b\/[^/]+\/[^/]+$/],
+  ];
+  for (const [prefix, isData] of dataFiles) {
+    let token: string | undefined;
+    do {
+      const r = await s3.send(new ListObjectsV2Command({ Bucket: st.bucket, Prefix: prefix, ContinuationToken: token }));
+      const data = (r.Contents ?? []).map((o) => ({ Key: o.Key! })).filter((k) => isData.test(k.Key));
+      if (data.length) await s3.send(new DeleteObjectsCommand({ Bucket: st.bucket, Delete: { Objects: data } }));
+      objects += data.length;
+      token = r.NextContinuationToken;
+    } while (token);
+  }
 
   let schedules = 0;
   let next: string | undefined;
@@ -128,6 +138,33 @@ const BUYERS = [
   'Imran Kumar', 'Jasmine Ong', 'Kelvin Teo', 'Li Wei', 'Mei Ling Koh', 'Nurul Aziz', 'Oliver Wong', 'Priya Nair',
   'Qi Hao Chen', 'Rachel Yeo', 'Siti Hassan', 'Terence Low', 'Uma Pillai', 'Vincent Sim', 'Wen Jun Ho', 'Xin Yi Tay',
 ];
+
+const ASSETS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'assets/seed');
+
+/** Stores a sample picture the way POST /m/uploads does (content-hashed key under b/{tenant}/) and returns its path. */
+async function uploadImage(st: Stack, tenant: string, file: string): Promise<string> {
+  const bytes = readFileSync(path.join(ASSETS, file));
+  const ext = file.endsWith('.png') ? 'png' : 'jpg';
+  const key = s3Keys.image(tenant, createHash('sha256').update(bytes).digest('hex').slice(0, 32), ext);
+  await s3.send(new PutObjectCommand({
+    Bucket: st.bucket, Key: key, Body: bytes, ContentType: ext === 'png' ? 'image/png' : 'image/jpeg',
+    CacheControl: 'public, max-age=31536000, immutable',
+  }));
+  return `/${key}`;
+}
+
+/** A profile plus the SLUG# item that holds its shop link, as PUT /m/profile would leave them. */
+async function putProfile(st: Stack, profile: MerchantProfile) {
+  await put(st, { ...keys.slug(profile.slug), type: 'Slug', tenantId: profile.tenantId });
+  await put(st, { ...keys.profile(profile.tenantId), type: 'Profile', ...profile, slugClaimed: true });
+}
+
+async function writeShop(st: Stack, profile: MerchantProfile, drops: Drop[]) {
+  await s3.send(new PutObjectCommand({
+    Bucket: st.bucket, Key: s3Keys.shopJson(profile.slug), ContentType: 'application/json', CacheControl: 'public, max-age=30',
+    Body: JSON.stringify(toPublicShop({ ...profile, slugClaimed: true }, drops)),
+  }));
+}
 
 async function put(st: Stack, item: Record<string, unknown>) {
   await doc.send(new PutCommand({ TableName: st.table, Item: item }));
@@ -198,11 +235,15 @@ async function merchantInvoke<T>(st: Stack, tenant: string, routeKey: string, bo
 
 async function load(st: Stack, tenant: string) {
   const now = Date.now();
+  const img = (file: string) => uploadImage(st, tenant, file);
   const profile: MerchantProfile = {
-    tenantId: tenant, name: 'Tiong Bahru Sourdough Co.', slug: 'tb-sourdough', colour: '#b5651d', paynow: '+65 9123 4567',
+    tenantId: tenant, name: 'Tiong Bahru Sourdough Co.', slug: 'tb-sourdough', colour: '#b5651d', theme: 'auto',
+    tagline: 'Baked Saturday mornings. Self-collect in Tiong Bahru.', paynow: '+65 9123 4567',
+    logoUrl: await img('tb-logo.png'), coverUrl: await img('tb-cover.jpg'),
     fulfilmentNote: 'Self-collect at 55 Tiong Bahru Rd, Saturday 2–5pm. Bring your order reference.', tier: 'starter',
+    slugClaimed: true,
   };
-  await put(st, { ...keys.profile(tenant), type: 'Profile', ...profile });
+  await putProfile(st, profile);
 
   const loaf = (stock: number): Variant => ({ id: 'v1', name: 'Country loaf', stock, priceCents: 900 });
   const rye = (stock: number): Variant => ({ id: 'v2', name: 'Seeded rye', stock, priceCents: 1100 });
@@ -220,16 +261,18 @@ async function load(st: Stack, tenant: string) {
   const openAt = new Date(now + (opensInMin + 5) * MIN);
   const created = await merchantInvoke<Drop>(st, tenant, 'POST /m/drops', {
     title: 'Saturday sourdough', description: 'Naturally leavened, baked Saturday morning. Limit 2 per buyer.',
+    imageUrl: await img('tb-sourdough.jpg'),
     variants: [{ name: 'Country loaf', stock: 40, priceCents: 900 }, { name: 'Seeded rye', stock: 20, priceCents: 1100 }],
     openAt: openAt.toISOString(), endAt: new Date(openAt.getTime() + 30 * MIN).toISOString(),
     entryWindowMin: 5, verification: 'off', holdSec: 300,
   });
-  await merchantInvoke<Drop>(st, tenant, 'POST /m/drops/{dropId}/schedule', undefined, created.dropId);
-  urls.push(`scheduled (queue opens in ${opensInMin} min): ${st.site}/d/${tenant}/${created.dropId}/`);
+  const scheduled = await merchantInvoke<Drop>(st, tenant, 'POST /m/drops/{dropId}/schedule', undefined, created.dropId);
+  urls.push(`scheduled, queue in ${opensInMin} min: ${st.site}/d/${tenant}/${created.dropId}/`);
 
   // Live now, 14 orders in; the controller is started on it and keeps ticking every minute
   const live = baseDrop(tenant, {
     title: 'Midweek baguettes', description: 'Classic baguettes, 2 per buyer.', state: 'Live', version: 3,
+    imageUrl: await img('tb-baguettes.jpg'),
     variants: [{ id: 'v1', name: 'Baguette', stock: 50, priceCents: 450 }, { id: 'v2', name: 'Demi-baguette', stock: 30, priceCents: 300 }],
     openAt: new Date(now - 3 * MIN).toISOString(), endAt: new Date(now + 45 * MIN).toISOString(), earlyCount: 40, ratePreset: 'fast', verification: 'email',
   });
@@ -242,24 +285,24 @@ async function load(st: Stack, tenant: string) {
     FunctionName: st.controllerFn, InvocationType: 'Event',
     Payload: Buffer.from(JSON.stringify({ action: 'open', tenantId: tenant, dropId: live.dropId })),
   }));
-  urls.push(`live (${liveOrders.orders} orders): ${st.site}/d/${tenant}/${live.dropId}/`);
+  urls.push(`live, ${liveOrders.orders} orders: ${st.site}/d/${tenant}/${live.dropId}/`);
 
   // Closed last Saturday, sold out, with paid / unpaid / no-show orders for reconciliation and export
   const lastSat = new Date(now - ((new Date(now).getDay() + 1) % 7 || 7) * 24 * 60 * MIN);
   lastSat.setUTCHours(1, 0, 0, 0);
   const closed = baseDrop(tenant, {
-    title: 'Saturday sourdough (last week)', state: 'Closed', version: 4,
+    title: 'Saturday sourdough (last week)', state: 'Closed', version: 4, imageUrl: await img('tb-baguettes-paper.jpg'),
     variants: [loaf(24), rye(12)], openAt: lastSat.toISOString(), endAt: new Date(lastSat.getTime() + 30 * MIN).toISOString(), earlyCount: 210,
   });
   const closedOrders = await dropWithOrders(st, closed, Array.from({ length: 22 }, (_, i) => ({
     variant: closed.variants[i % 3 === 2 ? 1 : 0]!, qty: i % 4 === 0 ? 1 : 2, status: statusMix(i, true),
   })));
   await publish(st, closed, profile, 'Closed', closedOrders.soldOut);
-  urls.push(`closed (${closedOrders.orders} orders): ${st.site}/d/${tenant}/${closed.dropId}/`);
+  urls.push(`closed, ${closedOrders.orders} orders: ${st.site}/d/${tenant}/${closed.dropId}/`);
 
   // Cancelled
   const cancelled = baseDrop(tenant, {
-    title: 'Croissant Friday (oven repair)', state: 'Cancelled', version: 3,
+    title: 'Croissant Friday (oven repair)', state: 'Cancelled', version: 3, imageUrl: await img('tb-croissants.jpg'),
     variants: [{ id: 'v1', name: 'Butter croissant', stock: 60, priceCents: 380 }],
     openAt: new Date(now - 2 * 24 * 60 * MIN).toISOString(), endAt: new Date(now - 2 * 24 * 60 * MIN + 30 * MIN).toISOString(),
   });
@@ -267,9 +310,96 @@ async function load(st: Stack, tenant: string) {
   await publish(st, cancelled, profile, 'Cancelled');
   urls.push(`cancelled: ${st.site}/d/${tenant}/${cancelled.dropId}/`);
 
-  console.log(`loaded shop "${profile.name}" with 5 drops for tenant ${tenant}`);
-  console.log(`console: ${st.site}/m/`);
-  for (const u of urls) console.log(`  ${u}`);
+  // The API wrote shop.json when the Scheduled drop was made; the seeded Live and Closed drops came in behind its back.
+  await writeShop(st, profile, [draft, scheduled, live, closed, cancelled]);
+
+  // Two more shops, public pages only (no console user owns them), to show other brands and themes side by side.
+  const showcase: string[] = [];
+  for (const shop of SHOWCASE) showcase.push(...(await loadShowcase(st, shop)));
+
+  const line = (label: string, url: string) => console.log(`  ${label.padEnd(30)} ${url}`);
+  console.log(`\nDemo links for ${stage} (shop "${profile.name}", tenant ${tenant})\n`);
+  console.log('Merchant');
+  line(`console${args.owner ? ` (sign in as ${args.owner})` : ''}`, `${st.site}/m/`);
+  console.log('\nShop pages');
+  line(profile.name, `${st.site}/s/${profile.slug}/`);
+  for (const s of showcase.filter((x) => x.startsWith('shop|'))) line(s.split('|')[1]!, s.split('|')[2]!);
+  console.log('\nDrop pages');
+  for (const u of urls) line(u.slice(0, u.lastIndexOf(': ')), u.slice(u.lastIndexOf(': ') + 2));
+  for (const s of showcase.filter((x) => x.startsWith('drop|'))) line(s.split('|')[1]!, s.split('|')[2]!);
+  console.log(`\nTip: the scheduled drop's queue opens ${opensInMin} min from now (--opens-in to change). Email codes show on screen while the stage is in log mode.`);
+}
+
+interface Showcase {
+  tenant: string;
+  profile: Omit<MerchantProfile, 'tenantId' | 'tier' | 'logoUrl' | 'coverUrl'>;
+  logo: string;
+  cover: string;
+  next: { title: string; description: string; image: string; variants: Array<{ name: string; stock: number; priceCents: number }>; inDays: number };
+  past: { title: string; image: string; variant: Variant; daysAgo: number };
+}
+
+const SHOWCASE: Showcase[] = [
+  {
+    tenant: 'seed-kopi-lab',
+    profile: {
+      name: 'Kopi Lab', slug: 'kopi-lab', colour: '#0f766e', theme: 'dark', tagline: 'Small-batch roasts from Joo Chiat.',
+      paynow: '+65 8123 4567', fulfilmentNote: 'Collect at 212 Joo Chiat Rd, Thursday 8am to 6pm.',
+    },
+    logo: 'kopi-logo.png', cover: 'kopi-cover.jpg',
+    next: {
+      title: 'Geisha micro-lot', description: 'Only 60 bags of this Panama Geisha. 200 g, whole bean, roasted Thursday.', image: 'kopi-beans.jpg',
+      variants: [{ name: 'Whole bean 200 g', stock: 40, priceCents: 3800 }, { name: 'Filter grind 200 g', stock: 20, priceCents: 3800 }], inDays: 2,
+    },
+    past: { title: 'Holiday blend', image: 'kopi-latte.jpg', variant: { id: 'v1', name: 'Holiday blend 250 g', stock: 80, priceCents: 2400 }, daysAgo: 9 },
+  },
+  {
+    tenant: 'seed-hue-ceramics',
+    profile: {
+      name: 'Hue Ceramics', slug: 'hue-ceramics', colour: '#f2c94c', theme: 'light', tagline: 'Wheel-thrown in Jalan Besar.',
+      paynow: '201912345A', fulfilmentNote: 'Delivered within 7 days, or collect from the studio on Saturdays.',
+    },
+    logo: 'hue-logo.png', cover: 'hue-cover.jpg',
+    next: {
+      title: 'Speckled mug restock', description: 'Forty mugs from the last firing, each one a little different. 350 ml, dishwasher safe.', image: 'hue-mug.jpg',
+      variants: [{ name: 'Oat speckle', stock: 20, priceCents: 4200 }, { name: 'Ink speckle', stock: 20, priceCents: 4200 }], inDays: 3,
+    },
+    past: { title: 'Bud vase trio', image: 'hue-cover.jpg', variant: { id: 'v1', name: 'Set of three', stock: 25, priceCents: 6800 }, daysAgo: 14 },
+  },
+];
+
+/** Returns `shop|label|url` and `drop|label|url` lines for the summary. */
+async function loadShowcase(st: Stack, shop: Showcase): Promise<string[]> {
+  const t = shop.tenant;
+  const profile: MerchantProfile = {
+    ...shop.profile, tenantId: t, tier: 'starter', slugClaimed: true,
+    logoUrl: await uploadImage(st, t, shop.logo), coverUrl: await uploadImage(st, t, shop.cover),
+  };
+  await putProfile(st, profile);
+
+  const openAt = new Date(Date.now() + shop.next.inDays * 24 * 60 * MIN);
+  openAt.setUTCHours(2, 0, 0, 0); // 10:00 in Singapore
+  const created = await merchantInvoke<Drop>(st, t, 'POST /m/drops', {
+    title: shop.next.title, description: shop.next.description, imageUrl: await uploadImage(st, t, shop.next.image),
+    variants: shop.next.variants, openAt: openAt.toISOString(), endAt: new Date(openAt.getTime() + 60 * MIN).toISOString(),
+    verification: 'email',
+  });
+  const scheduled = await merchantInvoke<Drop>(st, t, 'POST /m/drops/{dropId}/schedule', undefined, created.dropId);
+
+  const pastOpen = new Date(Date.now() - shop.past.daysAgo * 24 * 60 * MIN);
+  pastOpen.setUTCHours(2, 0, 0, 0);
+  const past = baseDrop(t, {
+    title: shop.past.title, state: 'Closed', version: 4, imageUrl: await uploadImage(st, t, shop.past.image), variants: [shop.past.variant],
+    openAt: pastOpen.toISOString(), endAt: new Date(pastOpen.getTime() + 60 * MIN).toISOString(), earlyCount: 120,
+  });
+  const pastOrders = await dropWithOrders(st, past, Array.from({ length: 12 }, (_, i) => ({ variant: shop.past.variant, qty: 2, status: statusMix(i, true) })));
+  await publish(st, past, profile, 'Closed', pastOrders.soldOut);
+
+  await writeShop(st, profile, [scheduled, past]);
+  return [
+    `shop|${profile.name} (${profile.theme})|${st.site}/s/${profile.slug}/`,
+    `drop|${profile.name}: countdown|${st.site}/d/${t}/${scheduled.dropId}/`,
+  ];
 }
 
 async function ownerTenant(st: Stack): Promise<string> {

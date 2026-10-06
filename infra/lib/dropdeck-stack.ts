@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { CfnOutput, Duration, RemovalPolicy, Stack, type StackProps } from 'aws-cdk-lib';
 import { CfnStage, CorsHttpMethod, HttpApi, HttpMethod } from 'aws-cdk-lib/aws-apigatewayv2';
@@ -8,10 +8,13 @@ import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations
 import { CfnBudget } from 'aws-cdk-lib/aws-budgets';
 import {
   AllowedMethods, CachePolicy, Distribution, Function as CfFunction, FunctionCode, FunctionEventType,
-  ViewerProtocolPolicy, CacheQueryStringBehavior, CacheHeaderBehavior, CacheCookieBehavior,
+  ResponseHeadersPolicy, ViewerProtocolPolicy, CacheQueryStringBehavior, CacheHeaderBehavior, CacheCookieBehavior,
 } from 'aws-cdk-lib/aws-cloudfront';
 import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
-import { AccountRecovery, OAuthScope, UserPool, UserPoolClient, UserPoolClientIdentityProvider } from 'aws-cdk-lib/aws-cognito';
+import {
+  AccountRecovery, CfnManagedLoginBranding, FeaturePlan, ManagedLoginVersion, OAuthScope, UserPool, UserPoolClient,
+  UserPoolClientIdentityProvider,
+} from 'aws-cdk-lib/aws-cognito';
 import { AttributeType, Billing, TableV2 } from 'aws-cdk-lib/aws-dynamodb';
 import { PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { Architecture, Runtime } from 'aws-cdk-lib/aws-lambda';
@@ -31,10 +34,29 @@ export const REWRITE_FN = `function handler(event) {
   var last = uri.split('/').pop();
   if (last.indexOf('.') !== -1) return r;
   if (uri.indexOf('/d/') === 0) { r.uri = '/d/index.html'; return r; }
+  if (uri.indexOf('/s/') === 0) { r.uri = '/s/index.html'; return r; }
   if (uri.endsWith('/')) { r.uri = uri + 'index.html'; return r; }
   r.uri = uri + '/index.html'; return r;
 }`;
 const repoRoot = path.resolve(here, '../..');
+
+/**
+ * Sign-in page branding (managed login). The style is designed in the Cognito branding editor, exported with
+ * `aws cognito-idp describe-managed-login-branding-by-client` and committed here; until then Cognito's default style
+ * is used. See infra/assets/README.md.
+ */
+function loginBranding(): Pick<CfnManagedLoginBranding, 'settings' | 'assets' | 'useCognitoProvidedValues'> {
+  const dir = path.join(here, '../assets');
+  const settingsFile = path.join(dir, 'managed-login.json');
+  if (!existsSync(settingsFile)) return { useCognitoProvidedValues: true, settings: undefined, assets: undefined };
+  const asset = (file: string, category: string, colorMode: string) => ({
+    category, colorMode, extension: path.extname(file).slice(1).toUpperCase(), bytes: readFileSync(path.join(dir, file)).toString('base64'),
+  });
+  const assets = [
+    ['login-logo-light.png', 'FORM_LOGO', 'LIGHT'], ['login-logo-dark.png', 'FORM_LOGO', 'DARK'], ['favicon.ico', 'FAVICON_ICO', 'DYNAMIC'],
+  ].filter(([file]) => existsSync(path.join(dir, file!))).map(([file, category, mode]) => asset(file!, category!, mode!));
+  return { useCognitoProvidedValues: false, settings: JSON.parse(readFileSync(settingsFile, 'utf8')), assets };
+}
 
 export interface DropDeckStackProps extends StackProps {
   stage: string;
@@ -126,6 +148,13 @@ export class DropDeckStack extends Stack {
       additionalBehaviors: {
         'd/*/state.json': { origin, cachePolicy: statePolicy, viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS, allowedMethods: AllowedMethods.ALLOW_GET_HEAD },
         'd/*/drop.json': { origin, cachePolicy: dropJsonPolicy, viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS, allowedMethods: AllowedMethods.ALLOW_GET_HEAD },
+        's/*/shop.json': { origin, cachePolicy: dropJsonPolicy, viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS, allowedMethods: AllowedMethods.ALLOW_GET_HEAD },
+        // Merchant uploads: immutable, content-addressed keys. No rewrite function, and nosniff so a browser only
+        // ever treats them as the image type S3 stored.
+        'b/*': {
+          origin, cachePolicy: CachePolicy.CACHING_OPTIMIZED, viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+          allowedMethods: AllowedMethods.ALLOW_GET_HEAD, responseHeadersPolicy: ResponseHeadersPolicy.SECURITY_HEADERS,
+        },
       },
     });
     const siteUrl = `https://${distribution.distributionDomainName}`;
@@ -136,11 +165,15 @@ export class DropDeckStack extends Stack {
       signInAliases: { email: true },
       autoVerify: { email: true },
       accountRecovery: AccountRecovery.EMAIL_ONLY,
+      // Essentials is what managed login (the branded sign-in page) needs; it bills per monthly active user, with a
+      // free tier, never by the hour. Plus is never used (a test guards it).
+      featurePlan: FeaturePlan.ESSENTIALS,
       removalPolicy: ephemeral ? RemovalPolicy.DESTROY : RemovalPolicy.RETAIN,
     });
     // Managed login (hosted UI) with the authorization-code + PKCE flow: a static site needs no SRP code.
     const userPoolDomain = userPool.addDomain('LoginDomain', {
       cognitoDomain: { domainPrefix: `dropdeck-${stage}-${this.account}` },
+      managedLoginVersion: ManagedLoginVersion.NEWER_MANAGED_LOGIN,
     });
     const loginOrigins = [siteUrl, ...devOrigins];
     const userPoolClient = new UserPoolClient(this, 'ConsoleClient', {
@@ -157,6 +190,12 @@ export class DropDeckStack extends Stack {
       accessTokenValidity: Duration.hours(1),
       idTokenValidity: Duration.hours(1),
       refreshTokenValidity: Duration.days(30),
+    });
+    // With the newer managed login, an app client without a style gets an error page, so the style ships with it.
+    new CfnManagedLoginBranding(this, 'LoginBranding', {
+      userPoolId: userPool.userPoolId,
+      clientId: userPoolClient.userPoolClientId,
+      ...loginBranding(),
     });
 
     // ---- Scheduling ----
@@ -180,7 +219,8 @@ export class DropDeckStack extends Stack {
       });
     };
 
-    const merchantFn = fn('MerchantApi', 'services/merchant-api/src/handler.ts');
+    // 15 s: a profile save republishes every published drop page of the shop.
+    const merchantFn = fn('MerchantApi', 'services/merchant-api/src/handler.ts', { timeout: 15 });
     const ticketFn = fn('Ticket', 'services/ticket/src/handler.ts', { memory: 256 });
     ticketFn.addEnvironment('BLOCK_SIZE', String(props.ticketBlockSize ?? 10));
     const claimFn = fn('Claim', 'services/claim/src/handler.ts');
@@ -250,6 +290,7 @@ export class DropDeckStack extends Stack {
     const merchantIntegration = new HttpLambdaIntegration('MerchantInt', merchantFn);
     const merchantRoutes: Array<[HttpMethod, string]> = [
       [HttpMethod.GET, '/m/profile'], [HttpMethod.PUT, '/m/profile'],
+      [HttpMethod.GET, '/m/slugs/{slug}'], [HttpMethod.POST, '/m/uploads'],
       [HttpMethod.GET, '/m/drops'], [HttpMethod.POST, '/m/drops'],
       [HttpMethod.GET, '/m/drops/{dropId}'], [HttpMethod.PATCH, '/m/drops/{dropId}'], [HttpMethod.DELETE, '/m/drops/{dropId}'],
       [HttpMethod.POST, '/m/drops/{dropId}/schedule'], [HttpMethod.POST, '/m/drops/{dropId}/unschedule'],
@@ -272,14 +313,14 @@ export class DropDeckStack extends Stack {
     const webOut = path.join(repoRoot, 'apps/web/out');
     const runtimeConfig = Source.jsonData('config.json', {
       apiUrl: api.apiEndpoint, userPoolId: userPool.userPoolId, userPoolClientId: userPoolClient.userPoolClientId,
-      authDomain: userPoolDomain.baseUrl(), stage, mailMode: props.mailFrom ? 'ses' : 'log',
+      authDomain: userPoolDomain.baseUrl(), stage, mailMode: props.mailFrom ? 'ses' : 'log', siteUrl,
     });
     new BucketDeployment(this, 'DeployWeb', {
       destinationBucket: bucket,
       sources: existsSync(webOut) ? [Source.asset(webOut), runtimeConfig] : [runtimeConfig],
-      prune: false, // never delete d/* objects written by the services
+      prune: false, // never delete d/, s/ or b/ objects written by the services
       distribution,
-      distributionPaths: ['/index.html', '/config.json', '/d/index.html', '/m/index.html', '/m/callback/index.html'],
+      distributionPaths: ['/index.html', '/config.json', '/d/index.html', '/s/index.html', '/m/index.html', '/m/callback/index.html'],
     });
 
     // ---- Cost guard ----

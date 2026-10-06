@@ -56,6 +56,24 @@ export function clearDropCache(): void {
   dropCache.clear();
 }
 
+/** Every drop of a tenant, newest first (paginated, so a long history is never cut short). */
+export async function listDrops(t: string): Promise<Drop[]> {
+  const k = keys.dropPrefix(t);
+  const out: Drop[] = [];
+  let start: Record<string, unknown> | undefined;
+  do {
+    const r = await ddb.send(new QueryCommand({
+      TableName: table(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
+      ExpressionAttributeValues: { ':pk': k.PK, ':sk': k.SKPrefix },
+      ExclusiveStartKey: start,
+    }));
+    out.push(...(r.Items ?? []).map((i) => strip<Drop>(i)!));
+    start = r.LastEvaluatedKey;
+  } while (start);
+  return out.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
 export async function getProfile(t: string): Promise<MerchantProfile | undefined> {
   const r = await ddb.send(new GetCommand({ TableName: table(), Key: keys.profile(t) }));
   return strip<MerchantProfile>(r.Item);

@@ -4,6 +4,10 @@
  */
 export const keys = {
   profile: (t: string) => ({ PK: `T#${t}`, SK: 'PROFILE' }),
+  /** Holds a shop slug for one tenant (attribute tenantId), so two shops cannot share /s/{slug}/. */
+  slug: (s: string) => ({ PK: `SLUG#${s}`, SK: 'SLUG' }),
+  /** Per-tenant, per-day image upload counter (expires via ttl). */
+  uploadQuota: (t: string, day: string) => ({ PK: `T#${t}`, SK: `UPLOADS#${day}` }),
   drop: (t: string, d: string) => ({ PK: `T#${t}`, SK: `DROP#${d}` }),
   dropPrefix: (t: string) => ({ PK: `T#${t}`, SKPrefix: 'DROP#' }),
   stockShard: (t: string, d: string, v: string, shard: number) => ({ PK: `S#${t}#${d}#${v}#${shard}`, SK: 'STOCK' }),
@@ -19,4 +23,7 @@ export const keys = {
 export const s3Keys = {
   dropJson: (t: string, d: string) => `d/${t}/${d}/drop.json`,
   stateJson: (t: string, d: string) => `d/${t}/${d}/state.json`,
+  shopJson: (slug: string) => `s/${slug}/shop.json`,
+  /** Uploaded images are content-addressed, so a key never changes meaning and can be cached for a year. */
+  image: (t: string, hash: string, ext: string) => `b/${t}/${hash}.${ext}`,
 };

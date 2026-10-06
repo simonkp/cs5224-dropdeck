@@ -5,6 +5,7 @@ import { createTable, enabled, http, liveDrop, parse, type Res } from './harness
 vi.mock('../../../services/merchant-api/src/publish.js', () => ({
   writeDropJson: vi.fn(), deleteDropJson: vi.fn(), writeStateJson: vi.fn(), deleteStateJson: vi.fn(),
   createOpenSchedule: vi.fn(), deleteOpenSchedule: vi.fn(),
+  putImage: vi.fn(), writeShopJson: vi.fn(), deleteShopJson: vi.fn(), refreshShop: vi.fn(), republishBranding: vi.fn(),
 }));
 
 const { handler: ticket } = await import('../../../services/ticket/src/handler.js');

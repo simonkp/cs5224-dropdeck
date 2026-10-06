@@ -48,7 +48,10 @@ async function confirmation(drop: Drop, order: Order) {
     variantName: order.variantName,
     qty: order.qty,
     amountCents: order.amountCents,
-    merchant: { name: profile?.name ?? 'The merchant', paynow: profile?.paynow, fulfilmentNote: profile?.fulfilmentNote },
+    merchant: {
+      name: profile?.name ?? 'The merchant', paynow: profile?.paynow, fulfilmentNote: profile?.fulfilmentNote,
+      logoUrl: profile?.logoUrl, colour: profile?.colour, theme: profile?.theme,
+    },
   };
 }
 

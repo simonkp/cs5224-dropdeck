@@ -15,5 +15,6 @@ One file per decision: context, decision, options rejected, consequences, and wh
 | 0009 | [Next.js static export with one generic drop page](0009-front-end-static-export.md) | 2026-10-05 |
 | 0010 | [Simon builds the initial end-to-end path; Liwen and Fung Wei review and then take over](0010-team-and-handover.md) | 2026-10-05 |
 | 0011 | [Cohort drop on Fri 30 Oct, backup Fri 6 Nov](0011-cohort-drop-date.md) | 2026-10-05 |
+| 0012 | [Mobile-first UI with Tailwind and shadcn/ui; each shop brands its pages](0012-ui-refresh-and-shop-branding.md) | 2026-10-06 |
 
 To add one: copy the newest file, bump the number, keep it under a page.

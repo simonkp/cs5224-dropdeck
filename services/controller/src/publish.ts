@@ -1,5 +1,5 @@
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { s3Keys, type PublicState } from '@dropdeck/shared';
+import { s3Keys, type PublicShop, type PublicState } from '@dropdeck/shared';
 
 const s3 = new S3Client({});
 
@@ -13,5 +13,18 @@ export async function writeState(t: string, d: string, state: PublicState): Prom
     Body: JSON.stringify(state),
     ContentType: 'application/json',
     CacheControl: 'public, max-age=2',
+  }));
+}
+
+/** The merchant's public shop page lists drop states, so it is rebuilt when a drop opens or closes. */
+export async function writeShopJson(slug: string, shop: PublicShop): Promise<void> {
+  const bucket = process.env.BUCKET_NAME;
+  if (!bucket) throw new Error('Missing env BUCKET_NAME');
+  await s3.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: s3Keys.shopJson(slug),
+    Body: JSON.stringify(shop),
+    ContentType: 'application/json',
+    CacheControl: 'public, max-age=30',
   }));
 }

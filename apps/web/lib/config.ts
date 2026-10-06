@@ -8,6 +8,8 @@ export interface RuntimeConfig {
   stage: string;
   /** 'log' until a sender is verified in SES: buyers see their email code on screen instead of by email. */
   mailMode?: 'ses' | 'log';
+  /** The CloudFront site, e.g. https://d123.cloudfront.net; uploaded images live there, also when running next dev. */
+  siteUrl?: string;
 }
 
 let pending: Promise<RuntimeConfig> | undefined;

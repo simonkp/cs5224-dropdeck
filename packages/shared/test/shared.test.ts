@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   admissionRatePerMin, admittedAt, admittedCount, checkAdmission, watermark,
   normaliseEmail, emailHash, sign, verifyHold, verifyTicket, ticketId, canTransition, isLockedForEdit, ApiError,
-  dropAdmissionRate, claimWindowStart,
+  dropAdmissionRate, claimWindowStart, toPublicShop, toPublicDrop, slugProblem, uploadPathRe,
+  type Drop, type MerchantProfile,
 } from '../src/index.js';
 
 describe('email normalisation', () => {
@@ -93,5 +94,46 @@ describe('lifecycle', () => {
     const drop = { state: 'Scheduled' as const, openAt: '2026-10-30T09:00:00Z', entryWindowMin: 15 };
     expect(isLockedForEdit(drop, new Date('2026-10-30T08:44:00Z'))).toBe(false);
     expect(isLockedForEdit(drop, new Date('2026-10-30T08:45:00Z'))).toBe(true);
+  });
+});
+
+describe('public shop page', () => {
+  const now = new Date('2026-12-10T00:00:00Z');
+  const profile: MerchantProfile = { tenantId: 't1', name: 'TB', slug: 'tb', tier: 'starter', paynow: '+65 9', slugClaimed: true };
+  const drop = (dropId: string, state: Drop['state'], openAt: string, endAt = openAt): Drop => ({
+    tenantId: 't1', dropId, state, title: dropId, description: '', openAt, endAt,
+    variants: [{ id: 'v1', name: 'a', stock: 1, priceCents: 900 }, { id: 'v2', name: 'b', stock: 1, priceCents: 450 }],
+    entryWindowMin: 15, graceSec: 30, perBuyerLimit: 2, holdSec: 300, admitWindowSec: 120, ratePreset: 'normal',
+    verification: 'email', shardCount: 1, createdAt: '', updatedAt: '', version: 1,
+  });
+
+  it('lists live, then upcoming soonest first, then recent past newest first; never drafts or cancelled', () => {
+    const shop = toPublicShop(profile, [
+      drop('later', 'Scheduled', '2026-12-20T02:00:00Z'), drop('draft', 'Draft', '2026-12-12T02:00:00Z'),
+      drop('old', 'Closed', '2026-10-01T02:00:00Z'), drop('lastweek', 'Closed', '2026-12-03T02:00:00Z'),
+      drop('soon', 'Scheduled', '2026-12-13T02:00:00Z'), drop('now', 'Live', '2026-12-09T23:50:00Z'),
+      drop('gone', 'Cancelled', '2026-12-11T02:00:00Z'), drop('recent', 'Closed', '2026-12-08T02:00:00Z'),
+    ], now);
+    expect(shop.drops.map((d) => d.dropId)).toEqual(['now', 'soon', 'later', 'recent', 'lastweek']);
+    expect(shop.drops[0]).toMatchObject({ url: '/d/t1/now/', fromPriceCents: 450, state: 'Live' });
+  });
+
+  it('never publishes the PayNow number, and exposes the slug only once it is claimed', () => {
+    expect(JSON.stringify(toPublicShop(profile, [], now))).not.toContain('+65');
+    expect(toPublicDrop(drop('x', 'Scheduled', '2026-12-13T02:00:00Z'), { ...profile, slugClaimed: undefined }).merchant.slug).toBeUndefined();
+    expect(toPublicDrop(drop('x', 'Scheduled', '2026-12-13T02:00:00Z'), profile).merchant).toMatchObject({ slug: 'tb', theme: 'auto' });
+  });
+});
+
+describe('branding rules', () => {
+  it('accepts plain shop links and refuses odd or reserved ones', () => {
+    expect(slugProblem('tb-sourdough')).toBeNull();
+    for (const bad of ['ab', '-tb', 'tb-', 'TB', 'tb.json', 'a'.repeat(41), 'admin']) expect(slugProblem(bad), bad).not.toBeNull();
+  });
+  it('matches only the tenant\'s own uploads', () => {
+    const re = uploadPathRe('t.1');
+    expect(re.test('/b/t.1/0123456789abcdef0123456789abcdef.png')).toBe(true);
+    expect(re.test('/b/tx1/0123456789abcdef0123456789abcdef.png')).toBe(false);
+    expect(re.test('/b/t.1/0123456789abcdef0123456789abcdef.svg')).toBe(false);
   });
 });

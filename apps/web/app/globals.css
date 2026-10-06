@@ -1,53 +1,89 @@
-:root { --bg: #fbfaf7; --ink: #1d1c1a; --muted: #6b675f; --line: #e3dfd6; --accent: #1f6feb; }
-@media (prefers-color-scheme: dark) { :root { --bg: #161513; --ink: #f1eee8; --muted: #a39e94; --line: #34312c; --accent: #6aa6ff; } }
-* { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-main { max-width: 640px; margin: 0 auto; padding: 32px 16px 64px; }
-h1 { font-size: 28px; line-height: 1.2; margin: 0 0 8px; }
-.muted { color: var(--muted); }
-.card { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 16px 0; }
-.big { font-size: 40px; font-variant-numeric: tabular-nums; font-weight: 600; }
-button { font: inherit; padding: 12px 20px; border-radius: 10px; border: 0; background: var(--accent); color: #fff; cursor: pointer; }
-button:disabled { opacity: .45; cursor: not-allowed; }
-ul.variants { list-style: none; padding: 0; margin: 0; }
-ul.variants li { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--line); }
+@import "tailwindcss";
+@import "@fontsource-variable/figtree";
+@import "@fontsource-variable/bricolage-grotesque";
+@import "@fontsource-variable/jetbrains-mono";
 
-/* Merchant console */
-main.wide { max-width: 880px; }
-h2 { font-size: 20px; margin: 0 0 12px; }
-.bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
-.bar nav { display: flex; gap: 8px; }
-.error { color: #b42318; }
-button.ghost, a.button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); }
-a.button { display: inline-block; padding: 12px 20px; border-radius: 10px; text-decoration: none; }
-button.danger { color: #b42318; }
-.actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-.actions button, .actions a.button { padding: 8px 14px; }
-.badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); vertical-align: middle; }
-.badge.scheduled { color: var(--accent); border-color: var(--accent); }
-.badge.live { color: #fff; background: #1a7f37; border-color: #1a7f37; }
-.badge.cancelled { color: #b42318; }
-.form label { display: flex; flex-direction: column; gap: 4px; margin: 0 0 12px; font-size: 14px; }
-.form label.inline { flex-direction: row; align-items: center; gap: 12px; }
-.form input, .form textarea, .form select {
-  font: inherit; padding: 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+/* Dark mode is a class, not the media query: a merchant can pin their pages light or dark (lib/brand.ts). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Design tokens. Surfaces follow light/dark; --brand-* are set per merchant on the page wrapper by lib/brand.ts and
+ * default to DropDeck's own ink + volt for the console.
+ */
+:root {
+  --bg: #f4f4f6;
+  --surface: #ffffff;
+  --ink: #101114;
+  --muted: #5c616b;
+  --line: #e4e4e8;
+  --field: #c9cbd1;
+  --sunken: #eef0f3;
+  --brand: #101114;
+  --brand-fg: #ffffff;
+  --brand-text: #101114;
+  --brand-tint: rgba(16, 17, 20, 0.08);
+  --brand-soft: rgba(16, 17, 20, 0.04);
+  --brand-art: rgba(255, 255, 255, 0.16);
 }
-.form input:disabled { opacity: .6; }
-.form textarea { min-height: 80px; }
-.form .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
-.form .row.variant { align-items: end; }
-.form .row.variant button { margin-bottom: 12px; }
-fieldset { border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin: 0 0 12px; }
-legend { padding: 0 6px; font-size: 14px; }
-.hero { width: 100%; border-radius: 12px; margin: 8px 0; }
-.notice { background: color-mix(in srgb, var(--accent) 12%, transparent); border-radius: 8px; padding: 8px 12px; }
-.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 16px 0; }
-.stat { border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 2px; }
-.stat strong { font-size: 22px; font-variant-numeric: tabular-nums; }
-.table-wrap { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
-td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-td select { font: inherit; padding: 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
-.waiting-details { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
-button.link { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
+.dark {
+  --bg: #0d0e11;
+  --surface: #17181c;
+  --ink: #f3f3f5;
+  --muted: #a1a5ae;
+  --line: #2a2c32;
+  --field: #3a3d45;
+  --sunken: #22242a;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-field: var(--field);
+  --color-sunken: var(--sunken);
+  --color-brand: var(--brand);
+  --color-brand-fg: var(--brand-fg);
+  --color-brand-text: var(--brand-text);
+  --color-brand-tint: var(--brand-tint);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-art: var(--brand-art);
+}
+
+@theme {
+  --font-sans: "Figtree Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Bricolage Grotesque Variable", "Figtree Variable", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+  --color-volt: #d4ff3a;
+  --color-ok: #1a7f37;
+  --color-ok-tint: #e7f3ea;
+  --color-ok-ink: #145c2a;
+  --color-danger: #b42318;
+  --color-danger-tint: #fdecea;
+  --color-warn: #8a4b00;
+  --color-warn-tint: #fff4e0;
+  --color-info: #1d4ed8;
+  --color-info-tint: #e8eefc;
+  --radius-card: 24px;
+  --animate-pulse-dot: pulse-dot 1.4s ease-out infinite;
+  @keyframes pulse-dot {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 55%, transparent); }
+    100% { box-shadow: 0 0 0 8px transparent; }
+  }
+}
+
+@layer base {
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    @apply bg-bg text-ink font-sans antialiased;
+    min-height: 100dvh;
+  }
+  :focus-visible { outline: 2px solid var(--brand-text); outline-offset: 2px; }
+  button, [role="button"], a { -webkit-tap-highlight-color: transparent; }
+  .tabular { font-variant-numeric: tabular-nums; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}
