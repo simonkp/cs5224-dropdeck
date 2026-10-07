@@ -248,7 +248,6 @@ async function load(st: Stack, tenant: string) {
 
   const loaf = (stock: number): Variant => ({ id: 'v1', name: 'Country loaf', stock, priceCents: 900 });
   const rye = (stock: number): Variant => ({ id: 'v2', name: 'Seeded rye', stock, priceCents: 1100 });
-  const urls: string[] = [];
 
   // Draft
   const draft = baseDrop(tenant, {
@@ -268,7 +267,6 @@ async function load(st: Stack, tenant: string) {
     entryWindowMin: 5, verification: 'off', holdSec: 300,
   });
   const scheduled = await merchantInvoke<Drop>(st, tenant, 'POST /m/drops/{dropId}/schedule', undefined, created.dropId);
-  urls.push(`scheduled, queue in ${opensInMin} min: ${st.site}/d/${tenant}/${created.dropId}/`);
 
   // Live now, 14 orders in; the controller is started on it and keeps ticking every minute
   const live = baseDrop(tenant, {
@@ -286,7 +284,6 @@ async function load(st: Stack, tenant: string) {
     FunctionName: st.controllerFn, InvocationType: 'Event',
     Payload: Buffer.from(JSON.stringify({ action: 'open', tenantId: tenant, dropId: live.dropId })),
   }));
-  urls.push(`live, ${liveOrders.orders} orders: ${st.site}/d/${tenant}/${live.dropId}/`);
 
   // Closed last Saturday, sold out, with paid / unpaid / no-show orders for reconciliation and export
   const lastSat = new Date(now - ((new Date(now).getDay() + 1) % 7 || 7) * 24 * 60 * MIN);
@@ -299,7 +296,6 @@ async function load(st: Stack, tenant: string) {
     variant: closed.variants[i % 3 === 2 ? 1 : 0]!, qty: i % 4 === 0 ? 1 : 2, status: statusMix(i, true),
   })));
   await publish(st, closed, profile, 'Closed', closedOrders.soldOut);
-  urls.push(`closed, ${closedOrders.orders} orders: ${st.site}/d/${tenant}/${closed.dropId}/`);
 
   // Cancelled
   const cancelled = baseDrop(tenant, {
@@ -309,7 +305,6 @@ async function load(st: Stack, tenant: string) {
   });
   await put(st, { ...keys.drop(tenant, cancelled.dropId), type: 'Drop', ...cancelled });
   await publish(st, cancelled, profile, 'Cancelled');
-  urls.push(`cancelled: ${st.site}/d/${tenant}/${cancelled.dropId}/`);
 
   // The API wrote shop.json when the Scheduled drop was made; the seeded Live and Closed drops came in behind its back.
   await writeShop(st, profile, [draft, scheduled, live, closed, cancelled]);
@@ -319,16 +314,15 @@ async function load(st: Stack, tenant: string) {
   for (const shop of SHOWCASE) showcase.push(...(await loadShowcase(st, shop)));
 
   const line = (label: string, url: string) => console.log(`  ${label.padEnd(30)} ${url}`);
-  console.log(`\nDemo links for ${stage} (shop "${profile.name}", tenant ${tenant})\n`);
-  console.log('Merchant');
-  line(`console${args.owner ? ` (sign in as ${args.owner})` : ''}`, `${st.site}/m/`);
-  console.log('\nShop pages');
-  line(profile.name, `${st.site}/s/${profile.slug}/`);
+  console.log(`\nDemo links for ${stage} (these stay the same across reseeds)\n`);
+  console.log('DropDeck');
+  line(`merchant console${args.owner ? ` (sign in as ${args.owner})` : ''}`, `${st.site}/m/`);
+  line('operators (ops page)', `${st.site}/ops/`);
+  console.log('\nShop pages (each lists its drops: live, coming up, past)');
+  line(`${profile.name} (${profile.theme}, your shop)`, `${st.site}/s/${profile.slug}/`);
   for (const s of showcase.filter((x) => x.startsWith('shop|'))) line(s.split('|')[1]!, s.split('|')[2]!);
-  console.log('\nDrop pages');
-  for (const u of urls) line(u.slice(0, u.lastIndexOf(': ')), u.slice(u.lastIndexOf(': ') + 2));
-  for (const s of showcase.filter((x) => x.startsWith('drop|'))) line(s.split('|')[1]!, s.split('|')[2]!);
-  console.log(`\nTip: the scheduled drop's queue opens ${opensInMin} min from now (--opens-in to change). Email codes show on screen while the stage is in log mode.`);
+  console.log(`\nOn ${profile.name}'s page, "${live.title}" is live now and "${scheduled.title}" opens its queue ${opensInMin} min from now (--opens-in to change).`);
+  console.log(`Email codes show on screen while the stage is in log mode. The ops page needs an operator: pnpm ops -- ${stage} make-operator <email>`);
 }
 
 interface Showcase {
@@ -372,7 +366,7 @@ const SHOWCASE: Showcase[] = [
   },
 ];
 
-/** Returns `shop|label|url` and `drop|label|url` lines for the summary. */
+/** Returns `shop|label|url` lines for the summary. */
 async function loadShowcase(st: Stack, shop: Showcase): Promise<string[]> {
   const t = shop.tenant;
   const profile: MerchantProfile = {
@@ -402,7 +396,6 @@ async function loadShowcase(st: Stack, shop: Showcase): Promise<string[]> {
   await writeShop(st, profile, [scheduled, past]);
   return [
     `shop|${profile.name} (${profile.theme})|${st.site}/s/${profile.slug}/`,
-    `drop|${profile.name}: countdown|${st.site}/d/${t}/${scheduled.dropId}/`,
   ];
 }
 
