@@ -24,12 +24,18 @@ const REF_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 /** 8 characters from 31: about 8.5e11 values, so a same-drop collision is negligible; the put is conditional anyway. */
 const newRef = () => Array.from({ length: 8 }, () => REF_ALPHABET[randomInt(REF_ALPHABET.length)]).join('');
 
+/** Orders (a buyer's name and email) are deleted this long after the drop ends (decision 0014, PDPA retention). */
+export const ORDER_RETENTION_DAYS = 180;
+
 /** Never overwrite another buyer's order: the ref must be new, or already belong to this hold (a retry). */
-async function putOrder(order: Order): Promise<void> {
+async function putOrder(order: Order, dropEndAt: string): Promise<void> {
   try {
     await ddb.send(new PutCommand({
       TableName: table(),
-      Item: { ...keys.order(order.tenantId, order.dropId, order.ref), type: 'Order', ...order },
+      Item: {
+        ...keys.order(order.tenantId, order.dropId, order.ref), type: 'Order', ...order,
+        ttl: Math.floor(Date.parse(dropEndAt) / 1000) + ORDER_RETENTION_DAYS * 86_400,
+      },
       ConditionExpression: 'attribute_not_exists(PK) OR holdId = :h',
       ExpressionAttributeValues: { ':h': order.holdId },
     }));
@@ -71,7 +77,7 @@ async function ensureOrder(drop: Drop, hold: Hold): Promise<Order> {
   const existing = strip<Order>((await ddb.send(new GetCommand({ TableName: table(), Key: k }))).Item);
   if (existing) return existing;
   const order = buildOrder(drop, hold, hold.orderRef!, hold.name ?? '', hold.email ?? '');
-  await putOrder(order);
+  await putOrder(order, drop.endAt);
   return order;
 }
 
@@ -126,7 +132,7 @@ async function confirm(drop: Drop, hold: Hold, body: { name?: unknown; email?: u
     throw new ApiError('HOLD_EXPIRED', 'Your hold has expired');
   }
   const order = buildOrder(drop, hold, ref, name, email);
-  await putOrder(order);
+  await putOrder(order, drop.endAt);
   console.log(JSON.stringify({ metric: 'order', t: drop.tenantId, d: drop.dropId, ref, holdId: hold.holdId, qty: hold.qty, msFromHold: now - hold.createdAt }));
   return confirmation(drop, order);
 }

@@ -3,6 +3,7 @@ import { Match, Template } from 'aws-cdk-lib/assertions';
 import { describe, expect, it } from 'vitest';
 import { DropDeckStack, REWRITE_FN } from '../lib/dropdeck-stack.js';
 import { ROUTES } from '../../services/merchant-api/src/handler.js';
+import { ROUTES as ADMIN_ROUTES } from '../../services/admin-api/src/handler.js';
 
 const template = Template.fromStack(new DropDeckStack(new App(), 'Test', {
   env: { account: '123456789012', region: 'ap-southeast-1' },
@@ -132,5 +133,60 @@ describe('branded sign-in', () => {
   });
   it('stays on the Essentials plan, never Plus', () => {
     template.hasResourceProperties('AWS::Cognito::UserPool', { UserPoolTier: 'ESSENTIALS' });
+  });
+});
+
+describe('security', () => {
+  const policy = () => Object.values(template.findResources('AWS::CloudFront::ResponseHeadersPolicy'))
+    .map((r) => (r as { Properties: { ResponseHeadersPolicyConfig: Record<string, any> } }).Properties.ResponseHeadersPolicyConfig)[0]!;
+
+  it('sends security headers on pages and JSON: CSP that forbids framing, HSTS, nosniff, referrer policy', () => {
+    const cfg = policy();
+    const csp: string = cfg.SecurityHeadersConfig.ContentSecurityPolicy.ContentSecurityPolicy['Fn::Join']
+      ? JSON.stringify(cfg.SecurityHeadersConfig.ContentSecurityPolicy.ContentSecurityPolicy)
+      : cfg.SecurityHeadersConfig.ContentSecurityPolicy.ContentSecurityPolicy;
+    expect(csp).toContain("frame-ancestors 'none'");
+    expect(csp).toContain("object-src 'none'");
+    expect(cfg.SecurityHeadersConfig.FrameOptions.FrameOption).toBe('DENY');
+    expect(cfg.SecurityHeadersConfig.StrictTransportSecurity.AccessControlMaxAgeSec).toBeGreaterThanOrEqual(31536000);
+    const dist = Object.values(template.findResources('AWS::CloudFront::Distribution'))[0] as { Properties: { DistributionConfig: { DefaultCacheBehavior: Record<string, unknown>; CacheBehaviors: Array<Record<string, unknown>> } } };
+    expect(dist.Properties.DistributionConfig.DefaultCacheBehavior.ResponseHeadersPolicyId).toBeDefined();
+    for (const b of dist.Properties.DistributionConfig.CacheBehaviors) expect(b.ResponseHeadersPolicyId, String(b.PathPattern)).toBeDefined();
+  });
+
+  it('lets services write only their data prefixes, never the web app files', () => {
+    type Pol = { Properties: { Roles: unknown; PolicyDocument: { Statement: Array<{ Action: string | string[]; Resource: unknown }> } } };
+    // The CDK deployment custom resource uploads the web app itself, so it alone writes the whole bucket.
+    const fnPolicies = (Object.values(template.findResources('AWS::IAM::Policy')) as Pol[])
+      .filter((p) => !JSON.stringify(p.Properties.Roles).includes('CustomCDKBucketDeployment'));
+    const writes = fnPolicies.flatMap((p) => p.Properties.PolicyDocument.Statement)
+      .filter((st) => [st.Action].flat().some((a) => /^s3:(PutObject|DeleteObject)/.test(a)));
+    expect(writes.length).toBeGreaterThanOrEqual(2);
+    for (const w of writes) {
+      for (const r of [w.Resource].flat()) expect(JSON.stringify(r)).toMatch(/\/(d|s|b)\/\*"/);
+    }
+  });
+
+  it('backs up and protects the table on staging, not on throwaway dev stages', () => {
+    template.hasResourceProperties('AWS::DynamoDB::GlobalTable', { Replicas: Match.arrayWith([Match.objectLike({ PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: false } })]) });
+    const staging = Template.fromStack(new DropDeckStack(new App(), 'Staging', {
+      env: { account: '123456789012', region: 'ap-southeast-1' }, stage: 'staging', budgetUsd: 10, budgetEmail: '', webOrigins: [],
+    }));
+    staging.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
+      Replicas: Match.arrayWith([Match.objectLike({ PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }, DeletionProtectionEnabled: true })]),
+    });
+  }, 30_000);
+
+  it('hides whether an email has an account, and throttles ticket floods separately', () => {
+    template.hasResourceProperties('AWS::Cognito::UserPoolClient', { PreventUserExistenceErrors: 'ENABLED' });
+    template.hasResourceProperties('AWS::ApiGatewayV2::Stage', {
+      RouteSettings: Match.objectLike({ 'POST /api/d/{tenantId}/{dropId}/ticket': Match.objectLike({ ThrottlingRateLimit: 600 }) }),
+    });
+  });
+
+  it('has an operators group and registers exactly the admin handler routes', () => {
+    template.hasResourceProperties('AWS::Cognito::UserPoolGroup', { GroupName: 'operators' });
+    const keys = Object.values(template.findResources('AWS::ApiGatewayV2::Route')).map((r) => (r as { Properties: { RouteKey: string } }).Properties.RouteKey);
+    expect(keys.filter((k) => / \/admin\//.test(k)).sort()).toEqual([...ADMIN_ROUTES].sort());
   });
 });

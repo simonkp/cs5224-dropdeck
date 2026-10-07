@@ -157,6 +157,7 @@ async function uploadImage(st: Stack, tenant: string, file: string): Promise<str
 async function putProfile(st: Stack, profile: MerchantProfile) {
   await put(st, { ...keys.slug(profile.slug), type: 'Slug', tenantId: profile.tenantId });
   await put(st, { ...keys.profile(profile.tenantId), type: 'Profile', ...profile, slugClaimed: true });
+  await put(st, { ...keys.tenantEntry(profile.tenantId), type: 'Tenant', tenantId: profile.tenantId, name: profile.name, slug: profile.slug, updatedAt: new Date().toISOString() });
 }
 
 async function writeShop(st: Stack, profile: MerchantProfile, drops: Drop[]) {
@@ -240,7 +241,7 @@ async function load(st: Stack, tenant: string) {
     tenantId: tenant, name: 'Tiong Bahru Sourdough Co.', slug: 'tb-sourdough', colour: '#b5651d', theme: 'auto',
     tagline: 'Baked Saturday mornings. Self-collect in Tiong Bahru.', paynow: '+65 9123 4567',
     logoUrl: await img('tb-logo.png'), coverUrl: await img('tb-cover.jpg'),
-    fulfilmentNote: 'Self-collect at 55 Tiong Bahru Rd, Saturday 2–5pm. Bring your order reference.', tier: 'starter',
+    fulfilmentNote: 'Self-collect at 55 Tiong Bahru Rd, Saturday 2–5pm. Bring your order reference.', tier: 'growth',
     slugClaimed: true,
   };
   await putProfile(st, profile);
@@ -332,6 +333,7 @@ async function load(st: Stack, tenant: string) {
 
 interface Showcase {
   tenant: string;
+  tier: MerchantProfile['tier'];
   profile: Omit<MerchantProfile, 'tenantId' | 'tier' | 'logoUrl' | 'coverUrl'>;
   logo: string;
   cover: string;
@@ -342,6 +344,7 @@ interface Showcase {
 const SHOWCASE: Showcase[] = [
   {
     tenant: 'seed-kopi-lab',
+    tier: 'growth',
     profile: {
       name: 'Kopi Lab', slug: 'kopi-lab', colour: '#0f766e', theme: 'dark', tagline: 'Small-batch roasts from Joo Chiat.',
       paynow: '+65 8123 4567', fulfilmentNote: 'Collect at 212 Joo Chiat Rd, Thursday 8am to 6pm.',
@@ -355,6 +358,7 @@ const SHOWCASE: Showcase[] = [
   },
   {
     tenant: 'seed-hue-ceramics',
+    tier: 'starter',
     profile: {
       name: 'Hue Ceramics', slug: 'hue-ceramics', colour: '#f2c94c', theme: 'light', tagline: 'Wheel-thrown in Jalan Besar.',
       paynow: '201912345A', fulfilmentNote: 'Delivered within 7 days, or collect from the studio on Saturdays.',
@@ -372,7 +376,7 @@ const SHOWCASE: Showcase[] = [
 async function loadShowcase(st: Stack, shop: Showcase): Promise<string[]> {
   const t = shop.tenant;
   const profile: MerchantProfile = {
-    ...shop.profile, tenantId: t, tier: 'starter', slugClaimed: true,
+    ...shop.profile, tenantId: t, tier: shop.tier, slugClaimed: true,
     logoUrl: await uploadImage(st, t, shop.logo), coverUrl: await uploadImage(st, t, shop.cover),
   };
   await putProfile(st, profile);

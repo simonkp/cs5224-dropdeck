@@ -3,7 +3,7 @@ import { ApiError, type Drop } from '@dropdeck/shared';
 
 vi.mock('../src/repo.js', () => ({
   getDrop: vi.fn(), getProfile: vi.fn(), transition: vi.fn(), writeStockShards: vi.fn(), saveDrop: vi.fn(),
-  listDrops: vi.fn(), saveProfile: vi.fn(), slugOwner: vi.fn(), bumpUploadQuota: vi.fn(),
+  listDrops: vi.fn(), saveProfile: vi.fn(), slugOwner: vi.fn(), bumpUploadQuota: vi.fn(), listUsage: vi.fn(),
 }));
 vi.mock('../src/publish.js', () => ({
   writeDropJson: vi.fn(), deleteDropJson: vi.fn(), writeStateJson: vi.fn(), deleteStateJson: vi.fn(),
@@ -64,6 +64,22 @@ describe('POST /schedule', () => {
     expect(pub.deleteDropJson).toHaveBeenCalled();
     expect(pub.deleteStateJson).toHaveBeenCalled();
     expect(repo.transition).toHaveBeenLastCalledWith(expect.objectContaining({ state: 'Scheduled' }), 'Draft');
+  });
+
+  it('refuses a third drop in a month on the Starter plan, with PLAN_LIMIT', async () => {
+    repo.getDrop.mockResolvedValue(draft());
+    repo.listDrops.mockResolvedValue([{ ...draft(), dropId: 'a', state: 'Closed' }, { ...draft(), dropId: 'b', state: 'Scheduled' }]);
+    const r = await call('POST /m/drops/{dropId}/schedule');
+    expect(r.statusCode).toBe(402);
+    expect(bodyOf(r).code).toBe('PLAN_LIMIT');
+    expect(repo.transition).not.toHaveBeenCalled();
+  });
+
+  it('lets a Growth shop schedule as many drops as it likes', async () => {
+    repo.getDrop.mockResolvedValue(draft());
+    repo.getProfile.mockResolvedValue({ tenantId: 'tenant-1', name: 'x', slug: 'x-shop', tier: 'growth' });
+    repo.listDrops.mockResolvedValue(['a', 'b', 'c'].map((id) => ({ ...draft(), dropId: id, state: 'Closed' as const })));
+    expect((await call('POST /m/drops/{dropId}/schedule')).statusCode).toBe(200);
   });
 
   it('a request that loses the state flip touches nothing', async () => {

@@ -180,6 +180,7 @@ function Orders({ ctx, drop }: { ctx: ConsoleCtx; drop: Drop }) {
             ))}
           </div>
 
+          <p className="text-[13px] text-muted">Orders are kept for 180 days after the drop, then deleted with the buyers&apos; details. Download the CSV to keep them longer.</p>
           {!shown && <><Skeleton className="h-32" /><Skeleton className="h-32" /></>}
           {shown?.length === 0 && <p className="text-sm text-muted">{orders?.length ? 'No orders match this filter.' : 'No orders yet.'}</p>}
 

@@ -1,7 +1,7 @@
 import type { APIGatewayProxyEventV2WithJWTAuthorizer } from 'aws-lambda';
 import { randomBytes } from 'node:crypto';
 import {
-  ALWAYS_EDITABLE, ApiError, canTransition, errorResult, isLockedForEdit, json, parseBody, slugProblem,
+  ALWAYS_EDITABLE, ApiError, canTransition, errorResult, isLockedForEdit, json, parseBody, planProblem, PLANS, slugProblem,
   type Drop, type MerchantProfile,
 } from '@dropdeck/shared';
 import * as repo from './repo.js';
@@ -65,6 +65,12 @@ export async function handler(event: Event) {
             : undefined,
         ]);
         return json(200, saved);
+      }
+
+      case 'GET /m/usage': {
+        const [profile, usage] = await Promise.all([repo.getProfile(t), repo.listUsage(t)]);
+        const tier = profile?.tier ?? 'starter';
+        return json(200, { tier, plan: PLANS[tier], months: usage });
       }
 
       case 'GET /m/slugs/{slug}': {
@@ -137,6 +143,9 @@ export async function handler(event: Event) {
         const drop = await repo.getDrop(t, d!);
         if (!canTransition(drop.state, 'Scheduled')) throw new ApiError('INVALID_STATE', `Cannot schedule a ${drop.state} drop`);
         assertSchedulable(drop, new Date());
+        const [profile, all] = await Promise.all([repo.getProfile(t), repo.listDrops(t)]);
+        const overPlan = planProblem(profile?.tier ?? 'starter', all, drop);
+        if (overPlan) throw new ApiError('PLAN_LIMIT', overPlan);
         // Flip the state first: of two concurrent requests only one gets past this conditional write,
         // so the loser can never roll back the winner's schedule.
         const scheduled = await repo.transition(drop, 'Scheduled');
@@ -182,7 +191,7 @@ export async function handler(event: Event) {
         const now = new Date().toISOString();
         const copy: Drop = {
           ...src, dropId: newId(), state: 'Draft', title: `${src.title} (copy)`,
-          earlyCount: undefined, createdAt: now, updatedAt: now, version: 1,
+          earlyCount: undefined, meteredAt: undefined, createdAt: now, updatedAt: now, version: 1,
         };
         await repo.createDrop(copy);
         return json(201, copy);
@@ -240,7 +249,7 @@ export async function handler(event: Event) {
 
 /** Routes registered in infra; keep in sync with the switch above. */
 export const ROUTES = [
-  'GET /m/profile', 'PUT /m/profile', 'GET /m/slugs/{slug}', 'POST /m/uploads',
+  'GET /m/profile', 'PUT /m/profile', 'GET /m/slugs/{slug}', 'POST /m/uploads', 'GET /m/usage',
   'GET /m/drops', 'POST /m/drops',
   'GET /m/drops/{dropId}', 'PATCH /m/drops/{dropId}', 'DELETE /m/drops/{dropId}',
   'POST /m/drops/{dropId}/schedule', 'POST /m/drops/{dropId}/unschedule',

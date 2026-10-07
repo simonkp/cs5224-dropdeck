@@ -8,12 +8,13 @@ import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations
 import { CfnBudget } from 'aws-cdk-lib/aws-budgets';
 import {
   AllowedMethods, CachePolicy, Distribution, Function as CfFunction, FunctionCode, FunctionEventType,
-  ResponseHeadersPolicy, ViewerProtocolPolicy, CacheQueryStringBehavior, CacheHeaderBehavior, CacheCookieBehavior,
+  HeadersFrameOption, HeadersReferrerPolicy, ResponseHeadersPolicy, ViewerProtocolPolicy, CacheQueryStringBehavior,
+  CacheHeaderBehavior, CacheCookieBehavior,
 } from 'aws-cdk-lib/aws-cloudfront';
 import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import {
-  AccountRecovery, CfnManagedLoginBranding, FeaturePlan, ManagedLoginVersion, OAuthScope, UserPool, UserPoolClient,
-  UserPoolClientIdentityProvider,
+  AccountRecovery, CfnManagedLoginBranding, CfnUserPoolGroup, FeaturePlan, ManagedLoginVersion, OAuthScope, UserPool,
+  UserPoolClient, UserPoolClientIdentityProvider,
 } from 'aws-cdk-lib/aws-cognito';
 import { AttributeType, Billing, TableV2 } from 'aws-cdk-lib/aws-dynamodb';
 import { PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
@@ -85,6 +86,8 @@ export class DropDeckStack extends Stack {
     const ephemeral = stage !== 'prod';
     // Local dev servers (e.g. localhost:3000) may call the API and use the login callback only on dev stages.
     const devOrigins = stage.startsWith('dev') ? props.webOrigins : [];
+    // Stages holding real merchants' data get backups and deletion protection; dev stages stay throwaway.
+    const durable = stage === 'staging' || stage === 'prod';
 
     // ---- Data: one on-demand table, sparse GSI1 for hold expiry ----
     const table = new TableV2(this, 'Table', {
@@ -93,6 +96,8 @@ export class DropDeckStack extends Stack {
       billing: Billing.onDemand(),
       timeToLiveAttribute: 'ttl',
       removalPolicy: ephemeral ? RemovalPolicy.DESTROY : RemovalPolicy.RETAIN,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: durable },
+      deletionProtection: durable,
       globalSecondaryIndexes: [{
         indexName: 'GSI1',
         partitionKey: { name: 'GSI1PK', type: AttributeType.STRING },
@@ -137,6 +142,37 @@ export class DropDeckStack extends Stack {
       code: FunctionCode.fromInline(REWRITE_FN),
     });
 
+    // Security headers for every page and JSON file (uploads under b/* keep the managed policy). The console keeps
+    // tokens in sessionStorage, so it must not be frameable and should only talk to our API and Cognito. Next's
+    // static export inlines its bootstrap script, hence 'unsafe-inline' for scripts; there is no user HTML anywhere.
+    // Wildcards for the API and Cognito hosts avoid a cycle (the API's CORS already depends on the distribution).
+    const securityHeaders = new ResponseHeadersPolicy(this, 'SecurityHeaders', {
+      securityHeadersBehavior: {
+        contentSecurityPolicy: {
+          override: true,
+          contentSecurityPolicy: [
+            "default-src 'self'",
+            "script-src 'self' 'unsafe-inline'",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data: blob: https:",
+            "font-src 'self' data:",
+            `connect-src 'self' https://*.execute-api.${this.region}.amazonaws.com https://*.auth.${this.region}.amazoncognito.com`,
+            "frame-ancestors 'none'",
+            "object-src 'none'",
+            "base-uri 'self'",
+            "form-action 'self'",
+          ].join('; '),
+        },
+        strictTransportSecurity: { override: true, accessControlMaxAge: Duration.days(365), includeSubdomains: true },
+        frameOptions: { override: true, frameOption: HeadersFrameOption.DENY },
+        contentTypeOptions: { override: true },
+        referrerPolicy: { override: true, referrerPolicy: HeadersReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN },
+      },
+      customHeadersBehavior: {
+        customHeaders: [{ header: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), payment=(), usb=()', override: true }],
+      },
+    });
+
     const distribution = new Distribution(this, 'Cdn', {
       defaultRootObject: 'index.html',
       defaultBehavior: {
@@ -144,11 +180,12 @@ export class DropDeckStack extends Stack {
         viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         cachePolicy: CachePolicy.CACHING_OPTIMIZED,
         functionAssociations: [{ function: rewrite, eventType: FunctionEventType.VIEWER_REQUEST }],
+        responseHeadersPolicy: securityHeaders,
       },
       additionalBehaviors: {
-        'd/*/state.json': { origin, cachePolicy: statePolicy, viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS, allowedMethods: AllowedMethods.ALLOW_GET_HEAD },
-        'd/*/drop.json': { origin, cachePolicy: dropJsonPolicy, viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS, allowedMethods: AllowedMethods.ALLOW_GET_HEAD },
-        's/*/shop.json': { origin, cachePolicy: dropJsonPolicy, viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS, allowedMethods: AllowedMethods.ALLOW_GET_HEAD },
+        'd/*/state.json': { origin, cachePolicy: statePolicy, responseHeadersPolicy: securityHeaders, viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS, allowedMethods: AllowedMethods.ALLOW_GET_HEAD },
+        'd/*/drop.json': { origin, cachePolicy: dropJsonPolicy, responseHeadersPolicy: securityHeaders, viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS, allowedMethods: AllowedMethods.ALLOW_GET_HEAD },
+        's/*/shop.json': { origin, cachePolicy: dropJsonPolicy, responseHeadersPolicy: securityHeaders, viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS, allowedMethods: AllowedMethods.ALLOW_GET_HEAD },
         // Merchant uploads: immutable, content-addressed keys. No rewrite function, and nosniff so a browser only
         // ever treats them as the image type S3 stored.
         'b/*': {
@@ -179,6 +216,8 @@ export class DropDeckStack extends Stack {
     const userPoolClient = new UserPoolClient(this, 'ConsoleClient', {
       userPool,
       generateSecret: false,
+      // Sign-in errors never reveal whether an email has an account.
+      preventUserExistenceErrors: true,
       authFlows: { userSrp: true },
       supportedIdentityProviders: [UserPoolClientIdentityProvider.COGNITO],
       oAuth: {
@@ -192,6 +231,10 @@ export class DropDeckStack extends Stack {
       refreshTokenValidity: Duration.days(30),
     });
     // With the newer managed login, an app client without a style gets an error page, so the style ships with it.
+    // DropDeck's own staff: members can use the /ops/ page and the /admin/* API. Membership is added by hand
+    // (docs/handover.md, "Make someone an operator").
+    new CfnUserPoolGroup(this, 'Operators', { userPoolId: userPool.userPoolId, groupName: 'operators', description: 'DropDeck operators (ops page and admin API)' });
+
     new CfnManagedLoginBranding(this, 'LoginBranding', {
       userPoolId: userPool.userPoolId,
       clientId: userPoolClient.userPoolClientId,
@@ -226,11 +269,16 @@ export class DropDeckStack extends Stack {
     const claimFn = fn('Claim', 'services/claim/src/handler.ts');
     const checkoutFn = fn('Checkout', 'services/checkout/src/handler.ts');
     const controllerFn = fn('Controller', 'services/controller/src/handler.ts', { timeout: 70 });
+    const adminFn = fn('AdminApi', 'services/admin-api/src/handler.ts', { timeout: 15 });
+    adminFn.addEnvironment('USER_POOL_ID', userPool.userPoolId);
+    userPool.grant(adminFn, 'cognito-idp:ListUsers');
 
     for (const f of [merchantFn, ticketFn, claimFn, checkoutFn, controllerFn]) table.grantReadWriteData(f);
-    bucket.grantPut(merchantFn);
-    bucket.grantDelete(merchantFn);
-    bucket.grantPut(controllerFn);
+    table.grantReadWriteData(adminFn);
+    // Services write only their own prefixes, never the web app's files (index.html, _next/, config.json).
+    const objects = (...prefixes: string[]) => prefixes.map((p) => bucket.arnForObjects(`${p}/*`));
+    merchantFn.addToRolePolicy(new PolicyStatement({ actions: ['s3:PutObject', 's3:DeleteObject'], resources: objects('d', 's', 'b') }));
+    controllerFn.addToRolePolicy(new PolicyStatement({ actions: ['s3:PutObject'], resources: objects('d', 's') }));
 
     // Signing keys: SecureStrings created by scripts/put-secrets.sh, read once per cold start (shared/secrets).
     const tokenKey = StringParameter.fromSecureStringParameterAttributes(this, 'TokenKey', { parameterName: `/dropdeck/${stage}/token-key` });
@@ -285,12 +333,19 @@ export class DropDeckStack extends Stack {
     // Stage-wide throttling; re-tuned from the 10x load test result.
     const cfnStage = api.defaultStage!.node.defaultChild as CfnStage;
     cfnStage.defaultRouteSettings = { throttlingBurstLimit: 2000, throttlingRateLimit: 1000 };
+    // Joining a queue gets its own share, so a flood of tickets on one drop cannot starve claims and checkout for
+    // every shop; uploads are slow, human actions.
+    cfnStage.routeSettings = {
+      // Raw CloudFormation (the L1 property is untyped), so the keys are PascalCase.
+      'POST /api/d/{tenantId}/{dropId}/ticket': { ThrottlingBurstLimit: 1200, ThrottlingRateLimit: 600 },
+      'POST /m/uploads': { ThrottlingBurstLimit: 10, ThrottlingRateLimit: 5 },
+    };
 
     const authorizer = new HttpUserPoolAuthorizer('MerchantAuth', userPool, { userPoolClients: [userPoolClient] });
     const merchantIntegration = new HttpLambdaIntegration('MerchantInt', merchantFn);
     const merchantRoutes: Array<[HttpMethod, string]> = [
       [HttpMethod.GET, '/m/profile'], [HttpMethod.PUT, '/m/profile'],
-      [HttpMethod.GET, '/m/slugs/{slug}'], [HttpMethod.POST, '/m/uploads'],
+      [HttpMethod.GET, '/m/slugs/{slug}'], [HttpMethod.POST, '/m/uploads'], [HttpMethod.GET, '/m/usage'],
       [HttpMethod.GET, '/m/drops'], [HttpMethod.POST, '/m/drops'],
       [HttpMethod.GET, '/m/drops/{dropId}'], [HttpMethod.PATCH, '/m/drops/{dropId}'], [HttpMethod.DELETE, '/m/drops/{dropId}'],
       [HttpMethod.POST, '/m/drops/{dropId}/schedule'], [HttpMethod.POST, '/m/drops/{dropId}/unschedule'],
@@ -300,9 +355,16 @@ export class DropDeckStack extends Stack {
       [HttpMethod.GET, '/m/drops/{dropId}/report'],
     ];
     for (const [method, p] of merchantRoutes) {
-      api.addRoutes({ path: p, methods: [method], integration: merchantIntegration, authorizer });
+      const routes = api.addRoutes({ path: p, methods: [method], integration: merchantIntegration, authorizer });
+      if (p === '/m/uploads') for (const r of routes) cfnStage.node.addDependency(r);
     }
-    api.addRoutes({ path: '/api/d/{tenantId}/{dropId}/ticket', methods: [HttpMethod.POST], integration: new HttpLambdaIntegration('TicketInt', ticketFn) });
+    // Operator routes: same authorizer; the handler requires the operators group.
+    const adminIntegration = new HttpLambdaIntegration('AdminInt', adminFn);
+    api.addRoutes({ path: '/admin/tenants', methods: [HttpMethod.GET], integration: adminIntegration, authorizer });
+    api.addRoutes({ path: '/admin/tenants/{tenantId}', methods: [HttpMethod.PATCH], integration: adminIntegration, authorizer });
+    const ticketRoutes = api.addRoutes({ path: '/api/d/{tenantId}/{dropId}/ticket', methods: [HttpMethod.POST], integration: new HttpLambdaIntegration('TicketInt', ticketFn) });
+    // The stage's per-route throttles name these routes, so they must exist before the stage is updated.
+    for (const r of ticketRoutes) cfnStage.node.addDependency(r);
     api.addRoutes({ path: '/api/d/{tenantId}/{dropId}/claim', methods: [HttpMethod.POST], integration: new HttpLambdaIntegration('ClaimInt', claimFn) });
     const checkoutInt = new HttpLambdaIntegration('CheckoutInt', checkoutFn);
     api.addRoutes({ path: '/api/holds/{holdId}', methods: [HttpMethod.GET], integration: checkoutInt });
@@ -320,7 +382,10 @@ export class DropDeckStack extends Stack {
       sources: existsSync(webOut) ? [Source.asset(webOut), runtimeConfig] : [runtimeConfig],
       prune: false, // never delete d/, s/ or b/ objects written by the services
       distribution,
-      distributionPaths: ['/index.html', '/config.json', '/d/index.html', '/s/index.html', '/m/index.html', '/m/callback/index.html'],
+      distributionPaths: [
+        '/index.html', '/config.json', '/d/index.html', '/s/index.html', '/m/index.html', '/m/callback/index.html',
+        '/ops/index.html', '/privacy/index.html',
+      ],
     });
 
     // ---- Cost guard ----

@@ -2,14 +2,14 @@
 
 // Types only from @dropdeck/shared at runtime-sensitive spots: its index pulls in node:crypto via tokens.ts.
 import type { Drop, MerchantProfile } from '@dropdeck/shared';
-import { ArrowRight, LayoutGrid, LogOut, Shuffle, ShieldCheck, Store, CreditCard, User, Download } from 'lucide-react';
+import { ArrowRight, LayoutGrid, LogOut, Shuffle, ShieldCheck, Store, CreditCard, User } from 'lucide-react';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
 import { Skeleton } from '../../components/ui/skeleton';
 import { api, ApiRequestError } from '../../lib/api';
-import { clearSession, getAccessToken, signedInEmail, signIn, signOut } from '../../lib/auth';
+import { clearSession, getAccessToken, signedInEmail, signedInGroups, signIn, signOut } from '../../lib/auth';
 import { brandStyle, initials } from '../../lib/brand';
 import { message } from '../../lib/format';
 import { cn } from '../../lib/utils';
@@ -19,6 +19,7 @@ import { OrdersView } from './OrdersView';
 import { ShopSettings } from './ShopSettings';
 import { ViewHeader, type ConsoleCtx, type Route } from './shared';
 import { useAssetUrl } from '../../lib/assets';
+import { Mark } from '../../components/mark';
 
 function parseRoute(search: string): Route {
   const q = new URLSearchParams(search);
@@ -57,11 +58,6 @@ function useRoute(): [Route, (r: Route) => void] {
   return [route, go];
 }
 
-export const Mark = ({ className }: { className?: string }) => (
-  <span className={cn('flex size-[30px] items-center justify-center rounded-[9px] bg-volt text-[#101114]', className)}>
-    <Download className="size-[18px]" strokeWidth={2.6} />
-  </span>
-);
 
 export default function Console() {
   const [ready, setReady] = useState(false);
@@ -231,8 +227,43 @@ function Account({ profile }: { profile: MerchantProfile | null }) {
             <a className="truncate text-sm font-semibold text-ink underline underline-offset-4" href={`/s/${profile.slug}/`} target="_blank" rel="noreferrer">{window.location.origin}/s/{profile.slug}/</a>
           </Card>
         )}
+        <PlanCard />
+        {signedInGroups().includes('operators') && (
+          <Card className="flex items-center justify-between gap-3">
+            <span className="text-sm font-semibold">You are a DropDeck operator</span>
+            <Button variant="outline" asChild><a href="/ops/">Open ops</a></Button>
+          </Card>
+        )}
         <Button variant="danger" size="lg" className="w-full" onClick={() => void signOut()}><LogOut />Sign out</Button>
       </div>
     </>
+  );
+}
+
+interface UsageView {
+  tier: string;
+  plan: { label: string; monthlySgd: number; perDropSgd: number; dropsPerMonth: number | null; unitsPerMonth: number | null; sessionsIncluded: number | null };
+  months: Array<{ month: string; drops: number; cancelled: number; sessions: number; orders: number }>;
+}
+
+/** The shop's plan and this month's metered usage (counted as each drop finishes). */
+function PlanCard() {
+  const [u, setU] = useState<UsageView | null>(null);
+  useEffect(() => { api<UsageView>('/m/usage').then(setU).catch(() => undefined); }, []);
+  if (!u) return null;
+  const month = new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 7);
+  const now = u.months.find((m) => m.month === month);
+  const price = u.plan.monthlySgd ? `S$${u.plan.monthlySgd}/month` : `S$${u.plan.perDropSgd} per drop`;
+  const facts = [
+    `${now?.drops ?? 0}${u.plan.dropsPerMonth ? ` of ${u.plan.dropsPerMonth}` : ''} drops finished`,
+    `${(now?.sessions ?? 0).toLocaleString()}${u.plan.sessionsIncluded ? ` of ${u.plan.sessionsIncluded.toLocaleString()}` : ''} buyer sessions`,
+    `${now?.orders ?? 0} orders`,
+  ];
+  return (
+    <Card className="flex flex-col gap-2">
+      <div className="flex items-baseline justify-between gap-3"><span className="text-sm font-semibold">Plan</span><span className="font-bold">{u.plan.label} · {price}</span></div>
+      <span className="text-sm text-muted">This month: {facts.join(' · ')}</span>
+      {u.plan.dropsPerMonth && <span className="text-[13px] text-muted">Includes {u.plan.dropsPerMonth} drops and {u.plan.unitsPerMonth} units a month. Ask DropDeck to change plan.</span>}
+    </Card>
   );
 }

@@ -1,8 +1,8 @@
 import type { Context } from 'aws-lambda';
-import { QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { GetCommand, QueryCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import {
   admissionStartsAt, admittedCount, dropAdmissionRate, entryOpensAt, FREEZE_DELAY_MS, keys, OPEN_LEAD_MS, toPublicShop,
-  watermark, type Drop, type PublicState,
+  usageMonth, watermark, type Drop, type Order, type PublicState,
 } from '@dropdeck/shared';
 import { ddb, getDrop, getProfile, isConditionFailure, listDrops, table } from '@dropdeck/shared/ddb';
 import { activeHoldCount, closeDrop, soldOutFlags, sweepExpired, unitsSold, voidActiveHolds } from './ops.js';
@@ -103,6 +103,84 @@ async function freezeEarlyCount(drop: Drop): Promise<number> {
   }
 }
 
+/** Everyone who took a ticket: the early group (frozen, or summed if the drop ended before the freeze) plus late tickets. */
+async function sessionsOf(drop: Drop): Promise<number> {
+  const late = await ddb.send(new GetCommand({ TableName: table(), Key: keys.ticketCounter(drop.tenantId, drop.dropId) }));
+  let early = drop.earlyCount;
+  if (early === undefined) {
+    const r = await ddb.send(new QueryCommand({
+      TableName: table(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
+      ExpressionAttributeValues: { ':pk': keys.earlyCounter(drop.tenantId, drop.dropId, 0).PK, ':sk': 'COUNTER#early#' },
+    }));
+    early = (r.Items ?? []).reduce((n, i) => n + Number(i.v ?? 0), 0);
+  }
+  return early + Number(late.Item?.v ?? 0);
+}
+
+async function ordersOf(drop: Drop): Promise<Order[]> {
+  const k = keys.orderPrefix(drop.tenantId, drop.dropId);
+  const out: Order[] = [];
+  let start: Record<string, unknown> | undefined;
+  do {
+    const r = await ddb.send(new QueryCommand({
+      TableName: table(),
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
+      ExpressionAttributeValues: { ':pk': k.PK, ':sk': k.SKPrefix },
+      ExclusiveStartKey: start,
+    }));
+    out.push(...((r.Items ?? []) as Order[]));
+    start = r.LastEvaluatedKey;
+  } while (start);
+  return out;
+}
+
+/**
+ * Add a finished drop to its shop's monthly usage, exactly once: the drop's `meteredAt` is claimed in the same
+ * transaction, and finish() runs on every tick that sees the drop over. Orders confirmed after this (a hold that
+ * outlives the close) are not counted; that is a few units at most and only ever undercounts.
+ * Not best effort: a failure throws, the tick schedule survives, and the next tick meters again.
+ */
+async function meter(drop: Drop): Promise<boolean> {
+  if (drop.meteredAt) return false;
+  const [sessions, orders] = await Promise.all([sessionsOf(drop), ordersOf(drop)]);
+  const month = usageMonth(drop.openAt);
+  try {
+    await ddb.send(new TransactWriteCommand({
+      TransactItems: [
+        {
+          Update: {
+            TableName: table(),
+            Key: keys.drop(drop.tenantId, drop.dropId),
+            UpdateExpression: 'SET meteredAt = :now',
+            ConditionExpression: 'attribute_not_exists(meteredAt)',
+            ExpressionAttributeValues: { ':now': new Date().toISOString() },
+          },
+        },
+        {
+          Update: {
+            TableName: table(),
+            Key: keys.usage(drop.tenantId, month),
+            UpdateExpression: 'ADD drops :d, cancelled :c, sessions :s, orders :o, units :u, revenueCents :r SET #type = :type, tenantId = :t, #month = :m',
+            ExpressionAttributeNames: { '#type': 'type', '#month': 'month' },
+            ExpressionAttributeValues: {
+              ':d': drop.state === 'Closed' ? 1 : 0, ':c': drop.state === 'Cancelled' ? 1 : 0, ':s': sessions,
+              ':o': orders.length, ':u': orders.reduce((n, o) => n + o.qty, 0), ':r': orders.reduce((n, o) => n + o.amountCents, 0),
+              ':type': 'Usage', ':t': drop.tenantId, ':m': month,
+            },
+          },
+        },
+      ],
+    }));
+  } catch (e) {
+    const err = e as { name?: string; CancellationReasons?: Array<{ Code?: string }> };
+    if (err.name === 'TransactionCanceledException' && err.CancellationReasons?.[0]?.Code === 'ConditionalCheckFailed') return false;
+    throw e;
+  }
+  log('drop metered', { t: drop.tenantId, d: drop.dropId, month, sessions, orders: orders.length });
+  return true;
+}
+
 /**
  * Wind down a Closed or Cancelled drop. Idempotent, so every controller that notices runs it. Republishing the
  * terminal state.json here is what settles a merchant cancel racing a tick: the tick read Live, the merchant wrote
@@ -117,6 +195,7 @@ async function finish(drop: Drop, nowMs: number, soldOut?: Record<string, boolea
     state: drop.state, serverTime: new Date(nowMs).toISOString(), rThreshold: 0, nWatermark: 0,
     earlyCount: drop.earlyCount ?? null, soldOut: soldOut ?? soldOutFlags(drop, await unitsSold(drop)),
   });
+  await meter(drop);
   await refreshShop(drop.tenantId, drop);
   await deleteTickSchedule(drop);
 }

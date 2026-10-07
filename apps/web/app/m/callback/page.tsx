@@ -9,7 +9,7 @@ export default function Callback() {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     completeSignIn(window.location.search)
-      .then(() => window.location.replace('/m/'))
+      .then((next) => window.location.replace(next))
       .catch((e: Error) => setError(e.message));
   }, []);
   return (

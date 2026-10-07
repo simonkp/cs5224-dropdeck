@@ -16,5 +16,7 @@ One file per decision: context, decision, options rejected, consequences, and wh
 | 0010 | [Simon builds the initial end-to-end path; Liwen and Fung Wei review and then take over](0010-team-and-handover.md) | 2026-10-05 |
 | 0011 | [Cohort drop on Fri 30 Oct, backup Fri 6 Nov](0011-cohort-drop-date.md) | 2026-10-05 |
 | 0012 | [Mobile-first UI with Tailwind and shadcn/ui; each shop brands its pages](0012-ui-refresh-and-shop-branding.md) | 2026-10-06 |
+| 0013 | [Operators, usage metering and plan limits](0013-operators-metering-plans.md) | 2026-10-07 |
+| 0014 | [Buyers' order data is deleted 180 days after the drop](0014-buyer-data-retention.md) | 2026-10-07 |
 
 To add one: copy the newest file, bump the number, keep it under a page.

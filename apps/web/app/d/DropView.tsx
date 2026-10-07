@@ -7,12 +7,10 @@ import { useDocumentBrand } from '../../components/brand';
 import { Skeleton } from '../../components/ui/skeleton';
 import { time } from '../../lib/format';
 import { Buyer, Ended } from './Buyer';
-import { ClockEstimate } from './buyer';
+import { ClockEstimate, loadSession, pollInterval, queueStatus } from './buyer';
 import {
   CalendarButton, Content, CountdownCard, Footer, Hero, HowItWorks, Page, RuleChips, ShopHeader, StateCard, StatusPill, TitleBlock, VariantGrid,
 } from './parts';
-
-const POLL_MS = 2000;
 
 function useDropPath() {
   const [ids, setIds] = useState<{ t: string; d: string } | null>(null);
@@ -45,17 +43,24 @@ export default function DropView() {
   }, [ids]);
 
   // Poll the cached state object at a FIXED URL. Never add a cache-busting query string:
-  // the CloudFront cache is what keeps polling cost independent of crowd size.
+  // the CloudFront cache is what keeps polling cost independent of crowd size. How often depends on what can
+  // change for this buyer right now (pollInterval); a tab coming back into view polls at once.
+  const dropRef = useRef<PublicDrop | null>(null);
+  dropRef.current = drop;
   useEffect(() => {
     if (!ids) return;
     let stop = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let last: PublicState | null = null;
     const tick = async () => {
+      clearTimeout(timer);
       try {
         const sentAt = Date.now();
         const r = await fetch(`/d/${ids.t}/${ids.d}/state.json`);
         const receivedAt = Date.now();
         if (r.ok) {
           const s = (await r.json()) as PublicState;
+          last = s;
           setState(s);
           // The Date + Age headers say when this copy was really served (a Scheduled drop's state.json is written
           // once and cached, so its serverTime is stale); without them (next dev) fall back to serverTime.
@@ -63,10 +68,23 @@ export default function DropView() {
           setOffset(Math.round(clock.current.ready ? clock.current.offset() : Date.parse(s.serverTime) - receivedAt));
         }
       } catch { /* keep the last state */ }
-      if (!stop) setTimeout(tick, POLL_MS);
+      if (stop) return;
+      const session = loadSession(ids.t, ids.d);
+      const now = Date.now() + (clock.current.ready ? clock.current.offset() : 0);
+      const entry = dropRef.current ? Date.parse(dropRef.current.entryOpensAt) : now; // drop.json not loaded yet: poll fast
+      timer = setTimeout(tick, pollInterval({
+        now, entryOpensAt: entry, hidden: document.visibilityState === 'hidden', state: last,
+        stage: session?.stage ?? null, ahead: session?.stage === 'queued' ? queueStatus(session, last).ahead : null,
+      }));
     };
-    tick();
-    return () => { stop = true; };
+    const onVisible = () => { if (document.visibilityState === 'visible') void tick(); };
+    document.addEventListener('visibilitychange', onVisible);
+    void tick();
+    return () => {
+      stop = true;
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [ids]);
 
   useEffect(() => {

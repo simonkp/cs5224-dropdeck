@@ -78,7 +78,12 @@ side. Photos and logos come from `eval/assets/seed` (sources in `CREDITS.md`). `
 - No VPC, NAT gateway, cache cluster or WAF: nothing bills by the hour.
 - `state.json` is cached 1–5 s and its cache key ignores query strings, headers and cookies. Clients
   poll a fixed URL; **never add a cache-busting parameter**.
-- API stage throttling and a monthly budget alarm per stage.
+- API stage throttling (tickets and uploads throttled separately) and a monthly budget alarm per stage.
+- Security headers (CSP, no framing, HSTS) on every page; functions write only their own bucket prefixes; staging and
+  prod tables have point-in-time recovery and deletion protection. See `docs/security.md`.
+
+Cost per drop, the idle month and the comparison with an EC2 + load balancer stack and with on-premise servers are in
+`docs/cost-bom.md`. Operators (DropDeck staff) use `<SiteUrl>/ops/` and `pnpm ops` (decision 0013).
 
 ## Week 1 checklist (exit: a drop can be created and viewed)
 

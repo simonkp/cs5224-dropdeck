@@ -3,7 +3,7 @@ import {
   BatchWriteCommand, DeleteCommand, DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, TransactWriteCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
-import { ApiError, keys, type Drop, type DropState, type MerchantProfile, type Order, type OrderStatus } from '@dropdeck/shared';
+import { ApiError, keys, type Drop, type DropState, type MerchantProfile, type Order, type OrderStatus, type Usage } from '@dropdeck/shared';
 import { env } from './env.js';
 import { shardCapacities } from './validate.js';
 
@@ -11,7 +11,7 @@ const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), { marshallOption
 
 const strip = <T>(item: Record<string, unknown> | undefined): T | undefined => {
   if (!item) return undefined;
-  const { PK: _pk, SK: _sk, type: _type, ...rest } = item;
+  const { PK: _pk, SK: _sk, type: _type, ttl: _ttl, ...rest } = item;
   return rest as T;
 };
 
@@ -51,6 +51,8 @@ export async function saveProfile(next: MerchantProfile, prev: MerchantProfile |
               : { ConditionExpression: 'attribute_not_exists(PK)' }),
           },
         },
+        // The registry operators list shops from (no table scan).
+        { Put: { TableName: env.table(), Item: { ...keys.tenantEntry(t), type: 'Tenant', tenantId: t, name: next.name, slug: next.slug, updatedAt: new Date().toISOString() } } },
         ...(moved
           ? [{
             Delete: {
@@ -72,6 +74,19 @@ export async function saveProfile(next: MerchantProfile, prev: MerchantProfile |
     throw e;
   }
   return saved;
+}
+
+/** The shop's metered months, newest first. */
+export async function listUsage(t: string): Promise<Usage[]> {
+  const k = keys.usagePrefix(t);
+  const r = await ddb.send(new QueryCommand({
+    TableName: env.table(),
+    KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
+    ExpressionAttributeValues: { ':pk': k.PK, ':sk': k.SKPrefix },
+    ScanIndexForward: false,
+    Limit: 12,
+  }));
+  return (r.Items ?? []).map((i) => strip<Usage>(i)!);
 }
 
 /** Who holds a slug, if anyone. */

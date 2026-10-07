@@ -168,6 +168,11 @@ Staging's data (drops, orders) does not move with it; load demo data with `pnpm 
 | Deploy a dev stage | `npx cdk deploy DropDeck-<stage> -c stage=<stage>` from `infra` (after `pnpm web:build`) |
 | Signing keys for a new stage | `scripts/put-secrets.sh <stage>`, once, before the first deploy |
 | Reset for a demo | `pnpm demo:reset -- <stage> [owner-email] [--opens-in N]`: AWS sign-in if needed, wipe, seed, print links (non-dev stages need `FORCE=1`) |
+| Make someone an operator | `pnpm ops -- <stage> make-operator <email>`, then they sign out and in, and open `<SiteUrl>/ops/` |
+| List shops / change a plan | `pnpm ops -- <stage> tenants`; plans are changed on the ops page |
+| Delete a shop and its data (PDPA) | `pnpm ops -- <stage> delete-tenant <tenantId>` (asks you to type the shop link) |
+| Shops saved before the registry | `pnpm ops -- <stage> backfill`, once per stage |
+| Cost model | `pnpm --filter @dropdeck/eval cost [-- --write] [--measured file.json]` |
 | Demo data | `pnpm seed -- --stage <stage> --owner <email> [--clear] [--opens-in N]` (`--clear` refuses non-dev stages without `--force`) |
 | Lifecycle smoke test (~9 min) | `pnpm --filter @dropdeck/eval e2e -- --stage <stage>` |
 | Oversell experiment | `pnpm --filter @dropdeck/eval oversell -- --stage <stage> --n 500 --m 50` |
@@ -208,14 +213,16 @@ and if you change a guard, break it on purpose once to check a test fails.
 3. **For now only Simon can see staging's AWS console and logs**, because sandbox accounts are per student. Deploy
    staging by pushing to `main`, debug on your own copy, or move staging (option B above) if the team prefers.
 4. **Evaluation tooling (Phase 5):** k6 load at 1×, 3×, 10× and a ramp; counter ceiling by shard count;
-   fairness from the `ticket` log lines (draw on vs off); elasticity at open; cost per drop. Metrics are
-   structured log lines today, not CloudWatch metrics (EMF would make dashboards cheap).
+   fairness from the `ticket` log lines (draw on vs off); elasticity at open. Cost per drop is modelled in
+   `docs/cost-bom.md` (`pnpm --filter @dropdeck/eval cost`); replace its assumptions with a measured drop
+   (`--measured`). Metrics are structured log lines today, not CloudWatch metrics (EMF would make dashboards cheap).
 5. **Checkout UX:** after a refresh the hold page forgets a code was sent, and a buyer spends another of their
    three sends. `GET /api/holds/{id}` already returns `codeSent`.
-6. **Misuse defences beyond the per-email limit** (named, not built): proof-of-work at ticket issue, per-IP limits
-   (needs WAF, which bills by the hour), Turnstile. Extra sessions buy better odds, not more orders.
-7. **Merchant sign-up is open** to anyone with an email. Pricing tiers (decision 0007) are not enforced; `tier`
-   is always `starter`.
+6. **Misuse defences beyond the per-email limit** (named, not built): proof-of-work at ticket issue, WAF per-IP
+   limits, Turnstile. Extra sessions buy better odds, not more orders. `docs/security.md` lists what is in place
+   and the accepted risks.
+7. **Merchant sign-up is open** to anyone with an email. Plans are enforced at `/schedule` and usage is metered
+   (decision 0013), but no payment is taken; the ops page shows an invoice preview.
 8. **Small things:** no refunds or order edits beyond status, uploaded images are never cleaned up, the console has no
    pagination for very large order lists, and `PATCH` on a Scheduled drop cannot move its time (unschedule first,
    by design).

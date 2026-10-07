@@ -6,6 +6,12 @@ export const keys = {
   profile: (t: string) => ({ PK: `T#${t}`, SK: 'PROFILE' }),
   /** Holds a shop slug for one tenant (attribute tenantId), so two shops cannot share /s/{slug}/. */
   slug: (s: string) => ({ PK: `SLUG#${s}`, SK: 'SLUG' }),
+  /** One shop's metered usage for a month (yyyy-mm, Singapore time): the pricing meter and the cost model's input. */
+  usage: (t: string, month: string) => ({ PK: `T#${t}`, SK: `USAGE#${month}` }),
+  usagePrefix: (t: string) => ({ PK: `T#${t}`, SKPrefix: 'USAGE#' }),
+  /** Registry of shops, so operators can list tenants without scanning the table. */
+  tenantEntry: (t: string) => ({ PK: 'TENANTS', SK: `T#${t}` }),
+  tenantsPrefix: () => ({ PK: 'TENANTS', SKPrefix: 'T#' }),
   /** Per-tenant, per-day image upload counter (expires via ttl). */
   uploadQuota: (t: string, day: string) => ({ PK: `T#${t}`, SK: `UPLOADS#${day}` }),
   drop: (t: string, d: string) => ({ PK: `T#${t}`, SK: `DROP#${d}` }),

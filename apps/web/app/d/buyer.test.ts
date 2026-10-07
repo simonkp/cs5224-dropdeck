@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { admittedAt, admittedCount, watermark, type PublicState } from '@dropdeck/shared';
-import { ClockEstimate, loadDetails, queueStatus, saveDetails } from './buyer';
+import { ClockEstimate, FAST_LEAD_MS, loadDetails, pollInterval, queueStatus, saveDetails } from './buyer';
 
 const state = (admitted: number, early: number): PublicState => ({
   state: 'Live', serverTime: '', ...watermark(admitted, early), earlyCount: early, soldOut: {},
@@ -84,5 +84,27 @@ describe('buyer details kept in the browser', () => {
     Object.assign(globalThis, { localStorage: undefined });
     expect(loadDetails()).toEqual({ name: '', email: '' });
     expect(() => saveDetails({ name: 'a', email: 'b' })).not.toThrow();
+  });
+});
+
+describe('pollInterval', () => {
+  const live = state(0, 0);
+  const base = { now: 0, entryOpensAt: 10 * 60_000, hidden: false, state: null, stage: null, ahead: null } as const;
+
+  it('polls slowly during a far countdown, fast before the queue opens', () => {
+    expect(pollInterval(base)).toBe(30_000);
+    expect(pollInterval({ ...base, now: base.entryOpensAt - FAST_LEAD_MS + 1 })).toBe(2_000);
+  });
+  it('is already fast when the controller can flip the drop Live (90 s ahead of the entry window)', () => {
+    expect(FAST_LEAD_MS).toBeGreaterThan(90_000);
+    expect(pollInterval({ ...base, now: base.entryOpensAt - 90_000 })).toBe(2_000);
+  });
+  it('slows down far back in line, after reserving, in a hidden tab, and once the drop is over', () => {
+    const open = { ...base, now: base.entryOpensAt, state: live };
+    expect(pollInterval({ ...open, stage: 'queued', ahead: 1200 })).toBe(5_000);
+    expect(pollInterval({ ...open, stage: 'queued', ahead: 40 })).toBe(2_000);
+    expect(pollInterval({ ...open, stage: 'held', ahead: null })).toBe(10_000);
+    expect(pollInterval({ ...open, hidden: true })).toBe(15_000);
+    expect(pollInterval({ ...open, state: { ...live, state: 'Closed' } })).toBe(30_000);
   });
 });

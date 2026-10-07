@@ -62,6 +62,8 @@ export interface Drop {
   shardCount: number;
   /** Frozen size of the early (random draw) group, set when the draw closes. */
   earlyCount?: number;
+  /** Set once the finished drop has been added to its shop's monthly usage. */
+  meteredAt?: string;
   createdAt: string;
   updatedAt: string;
   version: number;
@@ -84,6 +86,22 @@ export interface PublicDrop {
   /** Seconds an admitted buyer has to claim; the page shows it as a countdown. */
   admitWindowSec: number;
   verification: VerificationMode;
+}
+
+/** A shop's metered usage for one month, added to once per finished drop. */
+export interface Usage {
+  tenantId: string;
+  /** yyyy-mm in Singapore time. */
+  month: string;
+  /** Drops that ran to the end. */
+  drops: number;
+  /** Drops cancelled after they were scheduled. */
+  cancelled: number;
+  /** Buyer sessions: everyone who took a queue ticket (the Growth tier's meter). */
+  sessions: number;
+  orders: number;
+  units: number;
+  revenueCents: number;
 }
 
 /** One drop as listed on the public shop page. */

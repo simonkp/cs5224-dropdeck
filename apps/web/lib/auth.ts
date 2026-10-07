@@ -72,11 +72,12 @@ async function tokenRequest(params: Record<string, string>): Promise<Session> {
   return session;
 }
 
-export async function signIn(): Promise<void> {
+/** `returnTo` is a same-site path to land on after sign-in (the console, or /ops/). */
+export async function signIn(returnTo = '/m/'): Promise<void> {
   const cfg = await loadConfig();
   const verifier = randomString();
   const state = randomString();
-  store.set(PKCE, JSON.stringify({ verifier, state }));
+  store.set(PKCE, JSON.stringify({ verifier, state, returnTo }));
   const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
   const q = new URLSearchParams({
     response_type: 'code',
@@ -90,16 +91,20 @@ export async function signIn(): Promise<void> {
   window.location.assign(`${cfg.authDomain}/oauth2/authorize?${q}`);
 }
 
-/** Runs on /m/callback/: swaps the code for tokens. */
-export async function completeSignIn(search: string): Promise<void> {
+/** Only a path on this site, never another origin (`//evil.example` or `https://…`). */
+const safePath = (p: unknown) => (typeof p === 'string' && /^\/(?!\/)[\w\-/?=&.]*$/.test(p) ? p : '/m/');
+
+/** Runs on /m/callback/: swaps the code for tokens, and returns where to go next. */
+export async function completeSignIn(search: string): Promise<string> {
   const q = new URLSearchParams(search);
   const error = q.get('error_description') ?? q.get('error');
   if (error) throw new Error(error);
-  const pkce = JSON.parse(store.get(PKCE) ?? 'null') as { verifier: string; state: string } | null;
+  const pkce = JSON.parse(store.get(PKCE) ?? 'null') as { verifier: string; state: string; returnTo?: string } | null;
   store.remove(PKCE);
   const code = q.get('code');
   if (!code || !pkce || q.get('state') !== pkce.state) throw new Error('Sign-in link expired; please try again.');
   await tokenRequest({ grant_type: 'authorization_code', code, redirect_uri: redirectUri(), code_verifier: pkce.verifier });
+  return safePath(pkce.returnTo);
 }
 
 /** A valid access token, refreshed when within a minute of expiry; null when signed out. */
@@ -117,6 +122,17 @@ export async function getAccessToken(): Promise<string | null> {
 }
 
 export const signedInEmail = () => readSession()?.email;
+
+/** Cognito groups from the access token, for showing or hiding operator screens. The API checks them for real. */
+export function signedInGroups(): string[] {
+  const token = readSession()?.accessToken;
+  try {
+    const payload = JSON.parse(atob(token!.split('.')[1]!.replace(/-/g, '+').replace(/_/g, '/'))) as { 'cognito:groups'?: string[] };
+    return payload['cognito:groups'] ?? [];
+  } catch {
+    return [];
+  }
+}
 
 /** Drop a token the API rejected, so the console falls back to the sign-in screen instead of retrying it. */
 export const clearSession = () => store.remove(SESSION);

@@ -25,6 +25,8 @@ Every error body is `{ code, message, retryAfter? }` (`retryAfter` in seconds). 
 | `LOCKED_FOR_EDIT` | 409 | Field cannot change in the drop's current state |
 | `INVALID_STATE` | 409 | Lifecycle conflict (e.g. scheduling a non-draft, checkout on a cancelled drop), or the profile changed since it was read |
 | `SLUG_TAKEN` | 409 | Another shop already has that shop link |
+| `PLAN_LIMIT` | 402 | Scheduling this drop would go beyond the shop's plan (drops or units a month) |
+| `FORBIDDEN` | 403 | An `/admin/*` call from someone outside the `operators` group |
 | `ADMISSION_EXPIRED` | 410 | The ticket's claim window has passed; join again |
 | `HOLD_EXPIRED` | 410 | The hold ran out or was released |
 | `OTP_LOCKED` | 429 | Five wrong codes, or three codes sent, for this hold |
@@ -61,6 +63,8 @@ appear. The file can be a minute old, so show a Scheduled drop as live once its 
 `state.json` (`PublicState`): `state, serverTime, rThreshold (0..1), nWatermark, earlyCount (null until frozen),
 soldOut{variantId: bool}`. A buyer with draw position `r` is admitted when `earlyCount !== null && r <= rThreshold`;
 a late ticket `n` when `n < nWatermark`. The claim endpoint is the real gate.
+
+Orders are deleted 180 days after their drop ends (DynamoDB `ttl`, decision 0014).
 
 **Poll `state.json` at its fixed URL. Never add a query string**: the cache key ignores it, but a unique URL
 per poll is what turns a crowd into origin traffic. Take the clock offset from the `Date` + `Age` response headers.
@@ -116,12 +120,13 @@ key is scoped to it, so another merchant's drop is `NOT_FOUND`.
 | `PUT /m/profile` | `{ name?, slug?, logoUrl?, coverUrl?, colour?, theme?, tagline?, paynow?, fulfilmentNote? }` | profile; see profile rules |
 | `GET /m/slugs/{slug}` | | `{ slug, available, problem }`; `available` is true when the link is free or already yours |
 | `POST /m/uploads` | `{ image: base64 or data URL }` | `201 { path: "/b/{tenantId}/{hash}.{ext}", contentType, bytes }` |
+| `GET /m/usage` | | `{ tier, plan, months[{ month, drops, cancelled, sessions, orders, units, revenueCents }] }`, newest 12 months |
 | `GET /m/drops` | | `Drop[]`, newest first |
 | `POST /m/drops` | drop fields (below) | `201 Drop` (Draft) |
 | `GET /m/drops/{dropId}` | | `Drop` |
 | `PATCH /m/drops/{dropId}` | any drop fields | `Drop`; see editing rules |
 | `DELETE /m/drops/{dropId}` | | `204`; drafts only |
-| `POST /m/drops/{dropId}/schedule` | | `Drop` (Scheduled); writes shards, `drop.json`, `state.json`, open schedule |
+| `POST /m/drops/{dropId}/schedule` | | `Drop` (Scheduled); writes shards, `drop.json`, `state.json`, open schedule. `PLAN_LIMIT` beyond the plan (Starter: 2 drops, 200 units a month) |
 | `POST /m/drops/{dropId}/unschedule` | | `Drop` (Draft); before the entry window only |
 | `POST /m/drops/{dropId}/cancel` | | `Drop` (Cancelled); from Scheduled or Live |
 | `POST /m/drops/{dropId}/duplicate` | | `201 Drop` (Draft copy) |
@@ -156,12 +161,23 @@ fires 90 s ahead of it).
 `live` reads stock counters, so it shows units held or sold right now. `orders`, `export.csv` and `report` count
 orders only: after close, unswept holds keep counters high (docs/degradation.md).
 
+## Operator API (`{apiUrl}/admin/...`, Cognito access token in the `operators` group)
+
+Same sign-in as merchants; the handler checks the `cognito:groups` claim on every call (`FORBIDDEN` otherwise).
+
+| Route | Body | Returns |
+| --- | --- | --- |
+| `GET /admin/tenants?month=yyyy-mm` | | `{ month, tenants[{ tenantId, name, slug?, email?, tier, usage, invoice{lines, totalSgd}, live, scheduled }], totals }` |
+| `PATCH /admin/tenants/{tenantId}` | `{ tier: "starter" \| "growth" \| "event" }` | profile with `plan` |
+
+Deleting a shop is not an API route: `pnpm ops -- <stage> delete-tenant <tenantId>` (typed confirmation).
+
 ## Controller (EventBridge Scheduler → Lambda)
 
 | Event | When | Does |
 | --- | --- | --- |
 | `{ action: "open", tenantId, dropId }` | one-off, 90 s before `entryOpensAt` | Scheduled → Live, rebuilds `shop.json`, creates `tick-{dropId}` (rate 1 min), then ticks |
-| `{ action: "tick", tenantId, dropId }` | every minute while Live | ~55 s loop, a tick every 2.5 s: freeze early group, publish watermark and sold-out flags, sweep expired holds, close at `endAt` or when sold and settled; finish Closed / Cancelled drops (which also rebuilds `shop.json`) |
+| `{ action: "tick", tenantId, dropId }` | every minute while Live | ~55 s loop, a tick every 2.5 s: freeze early group, publish watermark and sold-out flags, sweep expired holds, close at `endAt` or when sold and settled; finish Closed / Cancelled drops (which also rebuilds `shop.json` and adds the drop to `USAGE#{month}` once) |
 
 Log lines worth querying in CloudWatch Logs Insights: `metric: "ticket"` (arrival, r or n, block, instance),
 `metric: "claim"`, `metric: "order"`, and controller `msg: "opened"` (`lagMs`), `"early group frozen"`,

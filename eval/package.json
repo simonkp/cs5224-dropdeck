@@ -7,7 +7,9 @@
     "typecheck": "tsc --noEmit",
     "oversell": "tsx oversell.ts",
     "e2e": "tsx e2e.ts",
-    "seed": "tsx seed.ts"
+    "seed": "tsx seed.ts",
+    "ops": "tsx ops.ts",
+    "cost": "tsx cost-model.ts"
   },
   "dependencies": {
     "@aws-sdk/client-cloudformation": "^3.1146.0",

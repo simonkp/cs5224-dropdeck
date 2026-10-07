@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { keys, type Drop, type PublicState } from '@dropdeck/shared';
+import { keys, usageMonth, type Drop, type PublicState } from '@dropdeck/shared';
 import { activeHolds, createTable, enabled, http, liveDrop, parse, shardSold, type Res } from './harness.js';
 
 vi.mock('../../../services/controller/src/publish.js', () => ({ writeState: vi.fn(), writeShopJson: vi.fn() }));
@@ -12,7 +12,7 @@ const { tickOnce } = await import('../../../services/controller/src/handler.js')
 const publish = vi.mocked(await import('../../../services/controller/src/publish.js'));
 const schedule = vi.mocked(await import('../../../services/controller/src/schedule.js'));
 const { clearDropCache, ddb, getDrop, getHold, releaseHold, table } = await import('@dropdeck/shared/ddb');
-const { UpdateCommand } = await import('@aws-sdk/lib-dynamodb');
+const { GetCommand, UpdateCommand } = await import('@aws-sdk/lib-dynamodb');
 
 const sum = (xs: Array<{ sold: number }>) => xs.reduce((n, x) => n + x.sold, 0);
 const lastState = (): PublicState => publish.writeState.mock.lastCall![2];
@@ -104,6 +104,20 @@ describe.skipIf(!enabled)('controller tick against DynamoDB Local', () => {
     expect((await getDrop(drop.tenantId, drop.dropId)).state).toBe('Closed');
     expect(lastState()).toMatchObject({ state: 'Closed', soldOut: { v1: true } });
     expect(schedule.deleteTickSchedule).toHaveBeenCalled();
+  });
+
+  it('adds a finished drop to the shop\'s monthly usage exactly once, however many ticks see it closed', async () => {
+    const drop = await liveDrop({ variants: [{ id: 'v1', name: 'Loaf', stock: 3, priceCents: 800 }], shardCount: 1 });
+    await confirm(await hold(drop, 2), 'one@example.com');
+    await confirm(await hold(drop), 'two@example.com');
+    expect(await tickOnce(drop.tenantId, drop.dropId, Date.now())).toBeNull();
+    await tickOnce(drop.tenantId, drop.dropId, Date.now()); // later ticks finish the drop again
+    await tickOnce(drop.tenantId, drop.dropId, Date.now());
+    const month = usageMonth(drop.openAt);
+    const u = (await ddb.send(new GetCommand({ TableName: table(), Key: keys.usage(drop.tenantId, month) }))).Item;
+    expect(u).toMatchObject({ drops: 1, cancelled: 0, orders: 2, units: 3, revenueCents: 2400, month });
+    expect(u!.sessions).toBeGreaterThanOrEqual(2);
+    expect((await getDrop(drop.tenantId, drop.dropId)).meteredAt).toBeTruthy();
   });
 
   it('closes at endAt, and a buyer still holding stock can finish checking out', async () => {

@@ -13,6 +13,7 @@
     "web:build": "pnpm --filter web build",
     "test:int": "scripts/test-int.sh",
     "seed": "pnpm --filter @dropdeck/eval seed",
-    "demo:reset": "scripts/demo-reset.sh"
+    "demo:reset": "scripts/demo-reset.sh",
+    "ops": "pnpm --silent --filter @dropdeck/eval ops"
   }
 }

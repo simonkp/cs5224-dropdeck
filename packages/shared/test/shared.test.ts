@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   admissionRatePerMin, admittedAt, admittedCount, checkAdmission, watermark,
   normaliseEmail, emailHash, sign, verifyHold, verifyTicket, ticketId, canTransition, isLockedForEdit, ApiError,
-  dropAdmissionRate, claimWindowStart, toPublicShop, toPublicDrop, slugProblem, uploadPathRe,
+  dropAdmissionRate, claimWindowStart, toPublicShop, toPublicDrop, slugProblem, uploadPathRe, planProblem, invoicePreview, usageMonth,
   type Drop, type MerchantProfile,
 } from '../src/index.js';
 
@@ -135,5 +135,37 @@ describe('branding rules', () => {
     expect(re.test('/b/t.1/0123456789abcdef0123456789abcdef.png')).toBe(true);
     expect(re.test('/b/tx1/0123456789abcdef0123456789abcdef.png')).toBe(false);
     expect(re.test('/b/t.1/0123456789abcdef0123456789abcdef.svg')).toBe(false);
+  });
+});
+
+describe('plans', () => {
+  const mk = (dropId: string, state: Drop['state'], openAt: string, stock = 50, meteredAt?: string): Drop => ({
+    tenantId: 't1', dropId, state, title: dropId, description: '', openAt, endAt: openAt, meteredAt,
+    variants: [{ id: 'v1', name: 'a', stock, priceCents: 900 }],
+    entryWindowMin: 15, graceSec: 30, perBuyerLimit: 2, holdSec: 300, admitWindowSec: 120, ratePreset: 'normal',
+    verification: 'email', shardCount: 1, createdAt: '', updatedAt: '', version: 1,
+  });
+  const oct = '2026-10-10T02:00:00Z';
+
+  it('counts the billing month in Singapore time', () => {
+    expect(usageMonth('2026-10-31T17:00:00Z')).toBe('2026-11'); // 1 am on 1 Nov in Singapore
+    expect(usageMonth('2026-10-31T15:00:00Z')).toBe('2026-10');
+  });
+
+  it('Starter: two drops and 200 units a month; drafts and never-opened cancellations do not count', () => {
+    const cand = mk('new', 'Draft', oct);
+    expect(planProblem('starter', [mk('a', 'Closed', oct), mk('b', 'Draft', oct), mk('c', 'Cancelled', oct)], cand)).toBeNull();
+    expect(planProblem('starter', [mk('a', 'Closed', oct), mk('b', 'Scheduled', oct)], cand)).toMatch(/2 drops a month/);
+    expect(planProblem('starter', [mk('a', 'Closed', oct), mk('c', 'Cancelled', oct, 50, oct)], cand)).toMatch(/2 drops/);
+    expect(planProblem('starter', [mk('a', 'Closed', oct, 180)], cand)).toMatch(/200 units/);
+    expect(planProblem('starter', [mk('a', 'Closed', '2026-09-10T02:00:00Z'), mk('b', 'Closed', '2026-09-11T02:00:00Z')], cand)).toBeNull();
+    expect(planProblem('growth', [mk('a', 'Closed', oct, 5000), mk('b', 'Live', oct)], cand)).toBeNull();
+  });
+
+  it('previews a month\'s bill from metered usage', () => {
+    expect(invoicePreview('starter', undefined).totalSgd).toBe(29);
+    expect(invoicePreview('growth', { drops: 3, cancelled: 0, sessions: 7200 })).toMatchObject({ totalSgd: 79 + 3 * 5 });
+    expect(invoicePreview('growth', { drops: 3, cancelled: 0, sessions: 4000 }).totalSgd).toBe(79);
+    expect(invoicePreview('event', { drops: 2, cancelled: 1, sessions: 9000 }).totalSgd).toBe(57);
   });
 });

@@ -525,6 +525,10 @@ function Held(props: {
           <Field label="Email" help="One order per email for this drop. The shop uses it to contact you about collection.">
             <Input required type="email" value={email} readOnly={Boolean(sent)} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
           </Field>
+          <p className="text-xs leading-snug text-muted">
+            Your name and email go to {drop.merchant.name} for this order and are deleted 180 days after the drop.{' '}
+            <a href="/privacy/" target="_blank" rel="noreferrer" className="font-semibold text-ink underline underline-offset-2">Privacy</a>
+          </p>
         </Card>
 
         {needsCode && sent && (

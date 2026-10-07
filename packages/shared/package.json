@@ -9,7 +9,9 @@
     ".": "./src/index.ts",
     "./secrets": "./src/secrets.ts",
     "./ddb": "./src/ddb.ts",
-    "./branding": "./src/branding.ts"
+    "./branding": "./src/branding.ts",
+    "./plans": "./src/plans.ts",
+    "./lifecycle": "./src/lifecycle.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

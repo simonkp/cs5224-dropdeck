@@ -1,4 +1,6 @@
 import type { PublicState } from '@dropdeck/shared';
+// Browser-safe subpath: the package index also pulls in node:crypto.
+import { OPEN_LEAD_MS } from '@dropdeck/shared/lifecycle';
 import { loadConfig } from '../../lib/config';
 
 /** Where this buyer is in the drop; kept per drop in localStorage so a refresh resumes. */
@@ -145,4 +147,31 @@ export class ClockEstimate {
   width(): number {
     return this.hi - this.lo;
   }
+}
+
+/**
+ * How long to wait before the next state.json poll. Polling is the biggest cost of a drop (docs/cost-bom.md), so
+ * pages poll fast only while something can change for this buyer, and slowly otherwise. The fast phase starts
+ * OPEN_LEAD_MS + 60 s before the queue opens: the controller flips the drop Live OPEN_LEAD_MS ahead, so a page is
+ * always polling fast by the time Join can work. The URL stays fixed whatever the interval (never cache-bust).
+ */
+export const FAST_LEAD_MS = OPEN_LEAD_MS + 60_000;
+
+export interface PollContext {
+  now: number;
+  entryOpensAt: number;
+  hidden: boolean;
+  state: PublicState | null;
+  stage: BuyerSession['stage'] | null;
+  /** People ahead, when queued. */
+  ahead: number | null;
+}
+
+export function pollInterval(c: PollContext): number {
+  if (c.hidden) return 15_000; // a background tab; it polls at once when shown again
+  if (c.state?.state === 'Closed' || c.state?.state === 'Cancelled') return 30_000;
+  if (c.entryOpensAt - c.now > FAST_LEAD_MS) return 30_000; // a countdown that is still far off
+  if (c.stage === 'held' || c.stage === 'confirmed') return 10_000; // only the end of the drop matters now
+  if (c.stage === 'queued' && c.ahead !== null && c.ahead > 300) return 5_000; // far back in line
+  return 2_000;
 }
