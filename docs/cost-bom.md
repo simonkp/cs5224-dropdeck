@@ -4,6 +4,8 @@ What DropDeck costs to run, what a drop costs, and how that compares with a clas
 
 ## How the architecture maps onto a classic web-app design
 
+![DropDeck as built (platform A below): the crowd polls cached files at the edge; only joins, claims and checkouts reach Lambda](architecture.svg)
+
 A classic scalable web app splits its work into stages (content in, heavy processing, delivery), puts EC2 web servers behind a load balancer with auto scaling, joins the stages with a queue, and serves readers from a CDN. DropDeck has the same parts, as managed services that cost nothing while idle:
 
 | Classic piece | DropDeck | Service model |
