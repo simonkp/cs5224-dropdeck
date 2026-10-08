@@ -15,6 +15,13 @@ if (env.account && !allowedAccounts.includes(env.account)) {
   throw new Error(`Account ${env.account} is not in cdk.json "allowedAccounts"; check AWS_PROFILE.`);
 }
 
+// Per-stage settings live in cdk.json under "stageSettings" (so CI deploys staging with them); -c flags override.
+const stageSettings = ((app.node.tryGetContext('stageSettings') ?? {}) as Record<string, Record<string, unknown>>)[stage] ?? {};
+const setting = (name: string): string | undefined => {
+  const v = app.node.tryGetContext(name) ?? stageSettings[name];
+  return v === undefined || v === '' ? undefined : String(v);
+};
+
 const stack = new DropDeckStack(app, `DropDeck-${stage}`, {
   env,
   stage,
@@ -22,8 +29,12 @@ const stack = new DropDeckStack(app, `DropDeck-${stage}`, {
   budgetEmail: String(app.node.tryGetContext('budgetEmail') ?? ''),
   webOrigins: (app.node.tryGetContext('webOrigins') as string[] | undefined) ?? [],
   ticketBlockSize: Number(app.node.tryGetContext('ticketBlockSize') ?? 10),
-  mailFrom: String(app.node.tryGetContext('mailFrom') ?? '') || undefined,
-  resendFallback: String(app.node.tryGetContext('resendFallback') ?? '') === 'true',
+  mailFrom: setting('mailFrom'),
+  resendFallback: setting('resendFallback') === 'true',
+  domainName: setting('domainName'),
+  certificateArn: setting('certificateArn'),
+  sesDomain: setting('sesDomain'),
+  signupEmailFromSes: setting('signupEmailFromSes') === 'true',
 });
 Tags.of(stack).add('Project', 'DropDeck');
 Tags.of(stack).add('Stage', stage);

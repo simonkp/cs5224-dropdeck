@@ -19,3 +19,5 @@ Sample pictures for the demo shops that `pnpm seed` loads. Shop names and logos 
 | hue-mug.jpg | photo-1514228742587-6b1558fcca3d |
 
 Any photo can be found at `https://images.unsplash.com/<photo id>`.
+
+The landing page (`apps/web/public/landing/`) reuses `tb-cover.jpg` (as bakery.jpg), `kopi-beans.jpg` (coffee.jpg), `hue-cover.jpg` (ceramics.jpg) and `tb-baguettes.jpg` (baguettes.jpg). Its phone images are screenshots of DropDeck's own pages with the demo data.

@@ -4,9 +4,10 @@ import {
   type CreateScheduleCommandInput,
 } from '@aws-sdk/client-scheduler';
 import {
-  entryOpensAt, OPEN_LEAD_MS, s3Keys, toPublicDrop, toPublicShop, type Drop, type DropState, type MerchantProfile,
-  type PublicState,
+  entryOpensAt, OPEN_LEAD_MS, s3Keys, toPublicDrop, toPublicFeatured, toPublicShop, type Drop, type DropState,
+  type MerchantProfile, type PublicState,
 } from '@dropdeck/shared';
+import { listFeatured, syncFeatured } from '@dropdeck/shared/ddb';
 import { env } from './env.js';
 import type { DecodedImage } from './images.js';
 import * as repo from './repo.js';
@@ -73,9 +74,22 @@ export async function refreshShop(t: string, changed: Drop): Promise<void> {
     if (!profile?.slugClaimed) return;
     const drops = (await repo.listDrops(t)).map((x) => (x.dropId === changed.dropId ? changed : x));
     await writeShopJson(profile, drops);
+    if (profile.listed) await refreshFeatured(profile, [changed]);
   } catch (e) {
     warn('shop.json refresh failed', e, { t });
   }
+}
+
+/** DropDeck's homepage list (p/featured.json), rebuilt from the FEATURED partition after syncing `drops`. */
+export async function refreshFeatured(profile: MerchantProfile | undefined, drops: Drop[]): Promise<void> {
+  await syncFeatured(profile, drops);
+  await s3.send(new PutObjectCommand({
+    Bucket: env.bucket(),
+    Key: s3Keys.featuredJson(),
+    Body: JSON.stringify(toPublicFeatured(await listFeatured())),
+    ContentType: 'application/json',
+    CacheControl: 'public, max-age=60',
+  }));
 }
 
 /** New branding reaches drop pages that are already published (Scheduled or Live). Returns how many failed. */

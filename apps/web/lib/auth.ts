@@ -72,8 +72,11 @@ async function tokenRequest(params: Record<string, string>): Promise<Session> {
   return session;
 }
 
-/** `returnTo` is a same-site path to land on after sign-in (the console, or /ops/). */
-export async function signIn(returnTo = '/m/'): Promise<void> {
+/**
+ * `returnTo` is a same-site path to land on after sign-in (the console, or /ops/). `screen: 'signup'` opens managed
+ * login on its create-account form (the /signup endpoint takes the same parameters as /oauth2/authorize).
+ */
+export async function signIn(returnTo = '/m/', screen: 'signin' | 'signup' = 'signin'): Promise<void> {
   const cfg = await loadConfig();
   const verifier = randomString();
   const state = randomString();
@@ -88,7 +91,7 @@ export async function signIn(returnTo = '/m/'): Promise<void> {
     code_challenge: challenge,
     code_challenge_method: 'S256',
   });
-  window.location.assign(`${cfg.authDomain}/oauth2/authorize?${q}`);
+  window.location.assign(`${cfg.authDomain}/${screen === 'signup' ? 'signup' : 'oauth2/authorize'}?${q}`);
 }
 
 /** Only a path on this site, never another origin (`//evil.example` or `https://…`). */

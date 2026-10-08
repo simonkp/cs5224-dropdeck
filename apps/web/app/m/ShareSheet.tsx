@@ -26,6 +26,8 @@ export function ShareSheet({ target, onClose }: { target: ShareTarget | null; on
 
   useEffect(() => {
     setWhich('drop');
+    // The getting-started checklist ticks "share" off once a merchant has opened this.
+    if (target) try { localStorage.setItem('dd.checklist.shared', '1'); } catch { /* private mode */ }
   }, [target]);
 
   useEffect(() => {

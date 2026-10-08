@@ -6,7 +6,7 @@ import { createTable, enabled, parse } from './harness.js';
 vi.mock('../../../services/merchant-api/src/publish.js', () => ({
   writeDropJson: vi.fn(), deleteDropJson: vi.fn(), writeStateJson: vi.fn(), deleteStateJson: vi.fn(),
   createOpenSchedule: vi.fn(), deleteOpenSchedule: vi.fn(),
-  putImage: vi.fn(), writeShopJson: vi.fn(async () => {}), deleteShopJson: vi.fn(async () => {}), refreshShop: vi.fn(),
+  putImage: vi.fn(), writeShopJson: vi.fn(async () => {}), deleteShopJson: vi.fn(async () => {}), refreshShop: vi.fn(), refreshFeatured: vi.fn(async () => {}),
   republishBranding: vi.fn(),
 }));
 

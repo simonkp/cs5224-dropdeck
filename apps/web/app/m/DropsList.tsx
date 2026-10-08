@@ -12,6 +12,7 @@ import { Skeleton } from '../../components/ui/skeleton';
 import { api } from '../../lib/api';
 import { day, dayTime } from '../../lib/format';
 import { cn } from '../../lib/utils';
+import { Checklist } from './Checklist';
 import { ShareSheet, type ShareTarget } from './ShareSheet';
 import { absolute, dropUrl, entryOpened, StateBadge, ViewHeader, type ConsoleCtx } from './shared';
 
@@ -68,6 +69,7 @@ export function DropsList({ ctx }: { ctx: ConsoleCtx }) {
       <ViewHeader title="Drops" actions={<div className="hidden lg:block">{newDrop}</div>} />
       {/* Bottom room on phones so the last card scrolls clear of the floating New drop button. */}
       <div className="flex flex-col gap-3 px-4 pb-20 lg:px-8 lg:pb-8">
+        {all && <Checklist profile={ctx.profile} drops={all} go={ctx.go} onShare={openShare} />}
         <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] lg:mx-0 lg:px-0" role="tablist" aria-label="Filter drops">
           {FILTERS.map(([f, label]) => (
             <button

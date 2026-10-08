@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   admissionRatePerMin, admittedAt, admittedCount, checkAdmission, watermark,
   normaliseEmail, emailHash, sign, verifyHold, verifyTicket, ticketId, canTransition, isLockedForEdit, ApiError,
-  dropAdmissionRate, claimWindowStart, toPublicShop, toPublicDrop, slugProblem, uploadPathRe, planProblem, invoicePreview, usageMonth,
+  dropAdmissionRate, claimWindowStart, toPublicShop, toPublicDrop, slugProblem, uploadPathRe, planProblem, invoicePreview, usageMonth, toPublicFeatured, isFeaturable, featuredEntry,
   type Drop, type MerchantProfile,
 } from '../src/index.js';
 
@@ -167,5 +167,32 @@ describe('plans', () => {
     expect(invoicePreview('growth', { drops: 3, cancelled: 0, sessions: 7200 })).toMatchObject({ totalSgd: 79 + 3 * 5 });
     expect(invoicePreview('growth', { drops: 3, cancelled: 0, sessions: 4000 }).totalSgd).toBe(79);
     expect(invoicePreview('event', { drops: 2, cancelled: 1, sessions: 9000 }).totalSgd).toBe(57);
+  });
+});
+
+describe('homepage drops', () => {
+  const now = new Date('2026-12-10T00:00:00Z');
+  const shop: MerchantProfile = { tenantId: 't1', name: 'TB', slug: 'tb', tier: 'growth', slugClaimed: true, listed: true };
+  const d = (dropId: string, state: Drop['state'], openAt: string): Drop => ({
+    tenantId: 't1', dropId, state, title: dropId, description: '', openAt, endAt: openAt,
+    variants: [{ id: 'v1', name: 'a', stock: 1, priceCents: 900 }],
+    entryWindowMin: 15, graceSec: 30, perBuyerLimit: 2, holdSec: 300, admitWindowSec: 120, ratePreset: 'normal',
+    verification: 'email', shardCount: 1, createdAt: '', updatedAt: '', version: 1,
+  });
+  it('lists only drops of shops that opted in and have a page', () => {
+    expect(isFeaturable(shop, d('a', 'Scheduled', '2026-12-12T02:00:00Z'))).toBe(true);
+    expect(isFeaturable({ ...shop, listed: false }, d('a', 'Scheduled', '2026-12-12T02:00:00Z'))).toBe(false);
+    expect(isFeaturable({ ...shop, slugClaimed: false }, d('a', 'Live', '2026-12-12T02:00:00Z'))).toBe(false);
+    expect(isFeaturable(shop, d('a', 'Draft', '2026-12-12T02:00:00Z'))).toBe(false);
+    expect(isFeaturable(shop, d('a', 'Cancelled', '2026-12-12T02:00:00Z'))).toBe(false);
+  });
+  it('orders live, then soonest upcoming, then recently ended; at most six', () => {
+    const e = (id: string, st: Drop['state'], at: string) => featuredEntry(shop, d(id, st, at));
+    const f = toPublicFeatured([
+      e('later', 'Scheduled', '2026-12-20T02:00:00Z'), e('old', 'Closed', '2026-11-01T02:00:00Z'), e('soon', 'Scheduled', '2026-12-11T02:00:00Z'),
+      e('now', 'Live', '2026-12-09T23:00:00Z'), e('recent', 'Closed', '2026-12-05T02:00:00Z'),
+    ], now);
+    expect(f.drops.map((x) => x.dropId)).toEqual(['now', 'soon', 'later', 'recent']);
+    expect(f.drops[0]!.shop).toEqual({ name: 'TB', slug: 'tb', logoUrl: undefined, colour: undefined });
   });
 });

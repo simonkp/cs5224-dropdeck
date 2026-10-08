@@ -12,6 +12,8 @@ export const keys = {
   /** Registry of shops, so operators can list tenants without scanning the table. */
   tenantEntry: (t: string) => ({ PK: 'TENANTS', SK: `T#${t}` }),
   tenantsPrefix: () => ({ PK: 'TENANTS', SKPrefix: 'T#' }),
+  /** One item per homepage-listed drop, sorted by draw time; p/featured.json is built from this partition. */
+  featured: (openAt: string, t: string, d: string) => ({ PK: 'FEATURED', SK: `${openAt}#${t}#${d}` }),
   /** Per-tenant, per-day image upload counter (expires via ttl). */
   uploadQuota: (t: string, day: string) => ({ PK: `T#${t}`, SK: `UPLOADS#${day}` }),
   drop: (t: string, d: string) => ({ PK: `T#${t}`, SK: `DROP#${d}` }),
@@ -30,6 +32,7 @@ export const s3Keys = {
   dropJson: (t: string, d: string) => `d/${t}/${d}/drop.json`,
   stateJson: (t: string, d: string) => `d/${t}/${d}/state.json`,
   shopJson: (slug: string) => `s/${slug}/shop.json`,
+  featuredJson: () => 'p/featured.json',
   /** Uploaded images are content-addressed, so a key never changes meaning and can be cached for a year. */
   image: (t: string, hash: string, ext: string) => `b/${t}/${hash}.${ext}`,
 };

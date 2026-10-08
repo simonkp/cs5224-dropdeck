@@ -33,6 +33,8 @@ export interface MerchantProfile {
   tier: 'starter' | 'growth' | 'event';
   /** Set once the slug is held by this tenant's SLUG# item; only then is s/{slug}/shop.json published. */
   slugClaimed?: boolean;
+  /** The shop chose to have its drops listed on DropDeck's homepage (off unless the merchant turns it on). */
+  listed?: boolean;
 }
 
 /** The branding every public page carries. `slug` is present only once the shop page exists. */
@@ -116,6 +118,17 @@ export interface PublicShopDrop {
   openAt: string;
   endAt: string;
   fromPriceCents: number;
+}
+
+/** A drop on DropDeck's homepage, with the shop it belongs to. */
+export interface FeaturedDrop extends PublicShopDrop {
+  shop: Pick<MerchantProfile, 'name' | 'slug' | 'logoUrl' | 'colour'>;
+}
+
+/** Written to p/featured.json: drops from shops that opted in to the homepage. */
+export interface PublicFeatured {
+  generatedAt: string;
+  drops: FeaturedDrop[];
 }
 
 /** Written to s/{slug}/shop.json whenever the profile or one of the merchant's drops changes. */

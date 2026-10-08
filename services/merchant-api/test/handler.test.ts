@@ -8,7 +8,7 @@ vi.mock('../src/repo.js', () => ({
 vi.mock('../src/publish.js', () => ({
   writeDropJson: vi.fn(), deleteDropJson: vi.fn(), writeStateJson: vi.fn(), deleteStateJson: vi.fn(),
   createOpenSchedule: vi.fn(), deleteOpenSchedule: vi.fn(),
-  putImage: vi.fn(), writeShopJson: vi.fn(), deleteShopJson: vi.fn(), refreshShop: vi.fn(), republishBranding: vi.fn(),
+  putImage: vi.fn(), writeShopJson: vi.fn(), deleteShopJson: vi.fn(), refreshShop: vi.fn(), refreshFeatured: vi.fn(async () => {}), republishBranding: vi.fn(),
 }));
 
 const repo = vi.mocked(await import('../src/repo.js'));
@@ -164,6 +164,21 @@ describe('PUT /m/profile', () => {
     expect(pub.republishBranding).toHaveBeenCalledWith(expect.objectContaining({ colour: '#e11d48' }), drops);
     expect(pub.writeShopJson).toHaveBeenCalledWith(expect.objectContaining({ colour: '#e11d48' }), drops);
     expect(pub.deleteShopJson).not.toHaveBeenCalled();
+  });
+
+  it('updates the homepage list when a shop opts in, and again when it opts out', async () => {
+    repo.getProfile.mockResolvedValue(profile());
+    await call('PUT /m/profile', { listed: true });
+    expect(pub.refreshFeatured).toHaveBeenCalledWith(expect.objectContaining({ listed: true }), []);
+    pub.refreshFeatured.mockClear();
+    repo.getProfile.mockResolvedValue({ ...profile(), listed: true });
+    await call('PUT /m/profile', { listed: false });
+    expect(pub.refreshFeatured).toHaveBeenCalledWith(expect.objectContaining({ listed: false }), []);
+    pub.refreshFeatured.mockClear();
+    repo.getProfile.mockResolvedValue(profile());
+    await call('PUT /m/profile', { tagline: 'unlisted shops never touch the homepage' });
+    expect(pub.refreshFeatured).not.toHaveBeenCalled();
+    expect((await call('PUT /m/profile', { listed: 'yes' })).statusCode).toBe(400);
   });
 
   it('takes the old shop page down when the slug moves', async () => {

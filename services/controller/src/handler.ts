@@ -2,11 +2,11 @@ import type { Context } from 'aws-lambda';
 import { GetCommand, QueryCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import {
   admissionStartsAt, admittedCount, dropAdmissionRate, entryOpensAt, FREEZE_DELAY_MS, keys, OPEN_LEAD_MS, toPublicShop,
-  usageMonth, watermark, type Drop, type Order, type PublicState,
+  toPublicFeatured, usageMonth, watermark, type Drop, type Order, type PublicState,
 } from '@dropdeck/shared';
-import { ddb, getDrop, getProfile, isConditionFailure, listDrops, table } from '@dropdeck/shared/ddb';
+import { ddb, getDrop, getProfile, isConditionFailure, listDrops, listFeatured, syncFeatured, table } from '@dropdeck/shared/ddb';
 import { activeHoldCount, closeDrop, soldOutFlags, sweepExpired, unitsSold, voidActiveHolds } from './ops.js';
-import { writeShopJson, writeState } from './publish.js';
+import { writeFeaturedJson, writeShopJson, writeState } from './publish.js';
 import { deleteTickSchedule, upsertTickSchedule } from './schedule.js';
 
 /**
@@ -43,6 +43,10 @@ async function refreshShop(t: string, changed: Drop): Promise<void> {
     if (!profile?.slugClaimed) return;
     const drops = (await listDrops(t)).map((x) => (x.dropId === changed.dropId ? changed : x));
     await writeShopJson(profile.slug, toPublicShop(profile, drops));
+    if (profile.listed) {
+      await syncFeatured(profile, [changed]);
+      await writeFeaturedJson(toPublicFeatured(await listFeatured()));
+    }
   } catch (e) {
     console.error(JSON.stringify({ level: 'error', msg: 'shop.json refresh failed', t, err: String(e) }));
   }

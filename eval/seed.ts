@@ -27,8 +27,9 @@ import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import { DeleteObjectsCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { DeleteScheduleCommand, ListSchedulesCommand, SchedulerClient } from '@aws-sdk/client-scheduler';
 import { BatchWriteCommand, DynamoDBDocumentClient, PutCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
+import { listFeatured, syncFeatured } from '@dropdeck/shared/ddb';
 import {
-  keys, s3Keys, shardCapacities, toPublicDrop, toPublicShop, type Drop, type DropState, type MerchantProfile, type Order, type OrderStatus,
+  keys, s3Keys, shardCapacities, toPublicDrop, toPublicFeatured, toPublicShop, type Drop, type DropState, type MerchantProfile, type Order, type OrderStatus,
   type PublicState, type Variant,
 } from '@dropdeck/shared';
 
@@ -102,6 +103,7 @@ async function clear(st: Stack) {
   const dataFiles: Array<[string, RegExp]> = [
     ['d/', /^d\/[^/]+\/[^/]+\/(drop|state)\.json$/],
     ['s/', /^s\/[^/]+\/shop\.json$/],
+    ['p/', /^p\/featured\.json$/],
     ['b/', /^b\/[^/]+\/[^/]+$/],
   ];
   for (const [prefix, isData] of dataFiles) {
@@ -242,7 +244,7 @@ async function load(st: Stack, tenant: string) {
     tagline: 'Baked Saturday mornings. Self-collect in Tiong Bahru.', paynow: '+65 9123 4567',
     logoUrl: await img('tb-logo.png'), coverUrl: await img('tb-cover.jpg'),
     fulfilmentNote: 'Self-collect at 55 Tiong Bahru Rd, Saturday 2–5pm. Bring your order reference.', tier: 'growth',
-    slugClaimed: true,
+    slugClaimed: true, listed: true,
   };
   await putProfile(st, profile);
 
@@ -313,11 +315,19 @@ async function load(st: Stack, tenant: string) {
   const showcase: string[] = [];
   for (const shop of SHOWCASE) showcase.push(...(await loadShowcase(st, shop)));
 
+  // The demo shops opted in to DropDeck's homepage: list their drops there.
+  await syncFeatured(profile, [draft, scheduled, live, closed, cancelled]);
+  await s3.send(new PutObjectCommand({
+    Bucket: st.bucket, Key: s3Keys.featuredJson(), ContentType: 'application/json', CacheControl: 'public, max-age=60',
+    Body: JSON.stringify(toPublicFeatured(await listFeatured())),
+  }));
+
   const line = (label: string, url: string) => console.log(`  ${label.padEnd(30)} ${url}`);
   console.log(`\nDemo links for ${stage} (these stay the same across reseeds)\n`);
   console.log('DropDeck');
   line(`merchant console${args.owner ? ` (sign in as ${args.owner})` : ''}`, `${st.site}/m/`);
   line('operators (ops page)', `${st.site}/ops/`);
+  line('DropDeck homepage', `${st.site}/`);
   console.log('\nShop pages (each lists its drops: live, coming up, past)');
   line(`${profile.name} (${profile.theme}, your shop)`, `${st.site}/s/${profile.slug}/`);
   for (const s of showcase.filter((x) => x.startsWith('shop|'))) line(s.split('|')[1]!, s.split('|')[2]!);
@@ -370,7 +380,7 @@ const SHOWCASE: Showcase[] = [
 async function loadShowcase(st: Stack, shop: Showcase): Promise<string[]> {
   const t = shop.tenant;
   const profile: MerchantProfile = {
-    ...shop.profile, tenantId: t, tier: shop.tier, slugClaimed: true,
+    ...shop.profile, tenantId: t, tier: shop.tier, slugClaimed: true, listed: true,
     logoUrl: await uploadImage(st, t, shop.logo), coverUrl: await uploadImage(st, t, shop.cover),
   };
   await putProfile(st, profile);
@@ -394,6 +404,7 @@ async function loadShowcase(st: Stack, shop: Showcase): Promise<string[]> {
   await publish(st, past, profile, 'Closed', pastOrders.soldOut);
 
   await writeShop(st, profile, [scheduled, past]);
+  await syncFeatured(profile, [scheduled, past]);
   return [
     `shop|${profile.name} (${profile.theme})|${st.site}/s/${profile.slug}/`,
   ];
@@ -413,5 +424,6 @@ async function ownerTenant(st: Stack): Promise<string> {
 }
 
 const st = await stack();
+process.env.TABLE_NAME = st.table; // for the shared table helpers (homepage list)
 if (args.clear) await clear(st);
 if (!args['no-load']) await load(st, await ownerTenant(st));

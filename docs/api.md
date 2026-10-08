@@ -46,6 +46,7 @@ Every error body is `{ code, message, retryAfter? }` (`retryAfter` in seconds). 
 | `/s/{slug}/` | static page | Next.js export, rewritten to `/s/index.html` |
 | `/s/{slug}/shop.json` | 30 s (max 60) | merchant API on profile save, schedule, unschedule, cancel and edits of Scheduled drops; controller on open and close |
 | `/b/{tenantId}/{hash}.{png,jpg,webp}` | 1 year, immutable | `POST /m/uploads`; content-addressed, never overwritten |
+| `/p/featured.json` | 60 s | merchant API and controller, when a drop of a shop with `listed: true` changes, and on that shop's profile saves |
 
 A missing file is `403` (S3 behind origin access control), not `404`; pages treat both as "not found".
 
@@ -59,6 +60,11 @@ keep the branding they were published with.
 state: Scheduled | Live | Closed, entryOpensAt, openAt, endAt, fromPriceCents}]`: Live first, then up to 20
 Scheduled soonest first, then up to 6 drops closed in the last 30 days, newest first. Drafts and cancelled drops never
 appear. The file can be a minute old, so show a Scheduled drop as live once its `entryOpensAt` has passed.
+
+`featured.json` (`PublicFeatured`): `generatedAt, drops[]`, where each drop is a `PublicShopDrop` plus
+`shop{name, slug, logoUrl?, colour?}`. Only shops that turned on `listed` appear. The list is ordered Live, then the
+soonest Scheduled, then drops closed in the last 14 days, and capped at 6. The homepage shows 3 and hides the section
+when the list is empty.
 
 `state.json` (`PublicState`): `state, serverTime, rThreshold (0..1), nWatermark, earlyCount (null until frozen),
 soldOut{variantId: bool}`. A buyer with draw position `r` is admitted when `earlyCount !== null && r <= rThreshold`;
@@ -117,7 +123,7 @@ key is scoped to it, so another merchant's drop is `NOT_FOUND`.
 | Route | Body | Returns |
 | --- | --- | --- |
 | `GET /m/profile` | | `MerchantProfile` or `null` |
-| `PUT /m/profile` | `{ name?, slug?, logoUrl?, coverUrl?, colour?, theme?, tagline?, paynow?, fulfilmentNote? }` | profile; see profile rules |
+| `PUT /m/profile` | `{ name?, slug?, logoUrl?, coverUrl?, colour?, theme?, tagline?, paynow?, fulfilmentNote?, listed? }` | profile; see profile rules |
 | `GET /m/slugs/{slug}` | | `{ slug, available, problem }`; `available` is true when the link is free or already yours |
 | `POST /m/uploads` | `{ image: base64 or data URL }` | `201 { path: "/b/{tenantId}/{hash}.{ext}", contentType, bytes }` |
 | `GET /m/usage` | | `{ tier, plan, months[{ month, drops, cancelled, sessions, orders, units, revenueCents }] }`, newest 12 months |
@@ -140,7 +146,8 @@ Profile rules (`validateProfileInput`): a merge, so a field left out keeps its v
 `tier` is never taken from the body. `name` 1–80; `slug` 3–40 of `a-z 0-9 -`, starting and ending with a letter or
 digit, not reserved (`admin`, `api`, `m`, `d`, `s`, `b`, …), unique across shops (`SLUG_TAKEN`); `colour` `#rrggbb`
 (stored lowercase); `theme` light | dark | auto (auto); `tagline` ≤ 140; `logoUrl` and `coverUrl` must be images this
-merchant uploaded (`/b/{tenantId}/…`); `paynow` ≤ 40; `fulfilmentNote` ≤ 300. A save republishes `drop.json` for the
+merchant uploaded (`/b/{tenantId}/…`); `paynow` ≤ 40; `fulfilmentNote` ≤ 300; `listed` true or false (list the shop's drops on DropDeck's homepage; false
+unless the merchant turns it on). A save republishes `drop.json` for the
 shop's Scheduled and Live drops and rewrites `shop.json` (deleting the old one when the slug moves); pages pick it up
 within about a minute.
 

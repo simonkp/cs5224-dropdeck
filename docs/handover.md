@@ -173,6 +173,7 @@ Staging's data (drops, orders) does not move with it; load demo data with `pnpm 
 | Delete a shop and its data (PDPA) | `pnpm ops -- <stage> delete-tenant <tenantId>` (asks you to type the shop link) |
 | Shops saved before the registry | `pnpm ops -- <stage> backfill`, once per stage |
 | Cost model | `pnpm --filter @dropdeck/eval cost [-- --write] [--measured file.json]` |
+| Our own domain and email | `docs/domain-setup.md`: certificate, DNS records, SES production access, sign-up email via SES |
 | Demo data | `pnpm seed -- --stage <stage> --owner <email> [--clear] [--opens-in N]` (`--clear` refuses non-dev stages without `--force`) |
 | Lifecycle smoke test (~9 min) | `pnpm --filter @dropdeck/eval e2e -- --stage <stage>` |
 | Oversell experiment | `pnpm --filter @dropdeck/eval oversell -- --stage <stage> --n 500 --m 50` |
@@ -203,7 +204,7 @@ and if you change a guard, break it on purpose once to check a test fails.
 
 ## Known gaps, in priority order
 
-1. **Email is in log mode on every stage.** Before the merchant sessions (from 26 Oct) and the cohort drop
+1. **Email is in log mode on every stage** (`docs/domain-setup.md` has the full sequence once the domain is bought). Before the merchant sessions (from 26 Oct) and the cohort drop
    (30 Oct): buy a domain, verify it in SES with DKIM, request SES production access (staging's URL works for the
    form), then set `mailFrom` for staging. Otherwise run those drops with buyer check "None". The SES branch of
    the mailer has never run; the Resend fallback needs a key at `/dropdeck/<stage>/resend-api-key` and

@@ -163,7 +163,7 @@ describe('security', () => {
       .filter((st) => [st.Action].flat().some((a) => /^s3:(PutObject|DeleteObject)/.test(a)));
     expect(writes.length).toBeGreaterThanOrEqual(2);
     for (const w of writes) {
-      for (const r of [w.Resource].flat()) expect(JSON.stringify(r)).toMatch(/\/(d|s|b)\/\*"/);
+      for (const r of [w.Resource].flat()) expect(JSON.stringify(r)).toMatch(/\/(d|s|b|p)\/\*"/);
     }
   });
 
@@ -188,5 +188,31 @@ describe('security', () => {
     template.hasResourceProperties('AWS::Cognito::UserPoolGroup', { GroupName: 'operators' });
     const keys = Object.values(template.findResources('AWS::ApiGatewayV2::Route')).map((r) => (r as { Properties: { RouteKey: string } }).Properties.RouteKey);
     expect(keys.filter((k) => / \/admin\//.test(k)).sort()).toEqual([...ADMIN_ROUTES].sort());
+  });
+});
+
+describe('own domain (optional)', () => {
+  const synth = (extra: Record<string, unknown>) => Template.fromStack(new DropDeckStack(new App(), 'Dom', {
+    env: { account: '123456789012', region: 'ap-southeast-1' }, stage: 'staging', budgetUsd: 10, budgetEmail: '', webOrigins: [], ...extra,
+  }));
+  it('changes nothing without a domain', () => {
+    const dist = Object.values(template.findResources('AWS::CloudFront::Distribution'))[0] as { Properties: { DistributionConfig: Record<string, unknown> } };
+    expect(dist.Properties.DistributionConfig.Aliases).toBeUndefined();
+    template.resourceCountIs('AWS::SES::EmailIdentity', 0);
+  });
+  it('serves the site on the domain, keeps the cloudfront.net name for sign-in, and verifies the mail domain', () => {
+    const t = synth({
+      domainName: 'drops.example.com', certificateArn: 'arn:aws:acm:us-east-1:123456789012:certificate/abc',
+      sesDomain: 'example.com', mailFrom: 'DropDeck <codes@example.com>', signupEmailFromSes: true,
+    });
+    t.hasResourceProperties('AWS::CloudFront::Distribution', { DistributionConfig: Match.objectLike({ Aliases: ['drops.example.com'] }) });
+    t.hasResourceProperties('AWS::SES::EmailIdentity', { EmailIdentity: 'example.com' });
+    t.hasResourceProperties('AWS::Cognito::UserPool', { EmailConfiguration: Match.objectLike({ EmailSendingAccount: 'DEVELOPER' }) });
+    const json = JSON.stringify(t.toJSON());
+    expect(json).toContain('https://drops.example.com/m/callback/');
+  });
+  it('refuses half a configuration', () => {
+    expect(() => synth({ domainName: 'drops.example.com' })).toThrow(/go together/);
+    expect(() => synth({ signupEmailFromSes: true })).toThrow(/mailFrom/);
   });
 });

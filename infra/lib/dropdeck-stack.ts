@@ -14,7 +14,7 @@ import {
 import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import {
   AccountRecovery, CfnManagedLoginBranding, CfnUserPoolGroup, FeaturePlan, ManagedLoginVersion, OAuthScope, UserPool,
-  UserPoolClient, UserPoolClientIdentityProvider,
+  UserPoolClient, UserPoolClientIdentityProvider, UserPoolEmail,
 } from 'aws-cdk-lib/aws-cognito';
 import { AttributeType, Billing, TableV2 } from 'aws-cdk-lib/aws-dynamodb';
 import { PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
@@ -25,6 +25,8 @@ import { BlockPublicAccess, Bucket, BucketEncryption } from 'aws-cdk-lib/aws-s3'
 import { BucketDeployment, Source } from 'aws-cdk-lib/aws-s3-deployment';
 import { CfnScheduleGroup } from 'aws-cdk-lib/aws-scheduler';
 import { StringParameter } from 'aws-cdk-lib/aws-ssm';
+import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
+import { EmailIdentity, Identity } from 'aws-cdk-lib/aws-ses';
 import type { Construct } from 'constructs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -73,6 +75,19 @@ export interface DropDeckStackProps extends StackProps {
   mailFrom?: string;
   /** Use Resend as the fallback sender; the key lives in SSM at /dropdeck/<stage>/resend-api-key. */
   resendFallback?: boolean;
+  /**
+   * The site on our own domain (e.g. drops.example.com), with an ACM certificate for it that must be in us-east-1
+   * (CloudFront's rule). Both or neither. docs/domain-setup.md has the steps.
+   */
+  domainName?: string;
+  certificateArn?: string;
+  /** Verify this domain in SES for sending; the DKIM CNAME records to add at the registrar are stack outputs. */
+  sesDomain?: string;
+  /**
+   * Send Cognito's sign-up and password emails through SES from mailFrom instead of Cognito's built-in sender
+   * (about 50 a day). Only once SES has production access, or sign-ups to unverified addresses fail.
+   */
+  signupEmailFromSes?: boolean;
 }
 
 /**
@@ -173,8 +188,13 @@ export class DropDeckStack extends Stack {
       },
     });
 
+    if (Boolean(props.domainName) !== Boolean(props.certificateArn)) throw new Error('domainName and certificateArn go together');
+    if (props.signupEmailFromSes && !props.mailFrom) throw new Error('signupEmailFromSes needs mailFrom (a verified SES sender)');
     const distribution = new Distribution(this, 'Cdn', {
       defaultRootObject: 'index.html',
+      ...(props.domainName && props.certificateArn
+        ? { domainNames: [props.domainName], certificate: Certificate.fromCertificateArn(this, 'SiteCert', props.certificateArn) }
+        : {}),
       defaultBehavior: {
         origin,
         viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
@@ -194,7 +214,10 @@ export class DropDeckStack extends Stack {
         },
       },
     });
-    const siteUrl = `https://${distribution.distributionDomainName}`;
+    // The public address: our domain when there is one; the cloudfront.net name keeps working either way.
+    const cloudfrontUrl = `https://${distribution.distributionDomainName}`;
+    const siteUrl = props.domainName ? `https://${props.domainName}` : cloudfrontUrl;
+    const siteOrigins = props.domainName ? [siteUrl, cloudfrontUrl] : [siteUrl];
 
     // ---- Merchant identity ----
     const userPool = new UserPool(this, 'Merchants', {
@@ -205,6 +228,16 @@ export class DropDeckStack extends Stack {
       // Essentials is what managed login (the branded sign-in page) needs; it bills per monthly active user, with a
       // free tier, never by the hour. Plus is never used (a test guards it).
       featurePlan: FeaturePlan.ESSENTIALS,
+      ...(props.signupEmailFromSes && props.mailFrom
+        ? {
+          email: UserPoolEmail.withSES({
+            fromEmail: props.mailFrom.replace(/^.*<|>$/g, ''),
+            fromName: 'DropDeck',
+            sesRegion: this.region,
+            sesVerifiedDomain: props.mailFrom.replace(/^.*<|>$/g, '').split('@')[1],
+          }),
+        }
+        : {}),
       removalPolicy: ephemeral ? RemovalPolicy.DESTROY : RemovalPolicy.RETAIN,
     });
     // Managed login (hosted UI) with the authorization-code + PKCE flow: a static site needs no SRP code.
@@ -212,7 +245,7 @@ export class DropDeckStack extends Stack {
       cognitoDomain: { domainPrefix: `dropdeck-${stage}-${this.account}` },
       managedLoginVersion: ManagedLoginVersion.NEWER_MANAGED_LOGIN,
     });
-    const loginOrigins = [siteUrl, ...devOrigins];
+    const loginOrigins = [...siteOrigins, ...devOrigins];
     const userPoolClient = new UserPoolClient(this, 'ConsoleClient', {
       userPool,
       generateSecret: false,
@@ -277,8 +310,8 @@ export class DropDeckStack extends Stack {
     table.grantReadWriteData(adminFn);
     // Services write only their own prefixes, never the web app's files (index.html, _next/, config.json).
     const objects = (...prefixes: string[]) => prefixes.map((p) => bucket.arnForObjects(`${p}/*`));
-    merchantFn.addToRolePolicy(new PolicyStatement({ actions: ['s3:PutObject', 's3:DeleteObject'], resources: objects('d', 's', 'b') }));
-    controllerFn.addToRolePolicy(new PolicyStatement({ actions: ['s3:PutObject'], resources: objects('d', 's') }));
+    merchantFn.addToRolePolicy(new PolicyStatement({ actions: ['s3:PutObject', 's3:DeleteObject'], resources: objects('d', 's', 'b', 'p') }));
+    controllerFn.addToRolePolicy(new PolicyStatement({ actions: ['s3:PutObject'], resources: objects('d', 's', 'p') }));
 
     // Signing keys: SecureStrings created by scripts/put-secrets.sh, read once per cold start (shared/secrets).
     const tokenKey = StringParameter.fromSecureStringParameterAttributes(this, 'TokenKey', { parameterName: `/dropdeck/${stage}/token-key` });
@@ -324,7 +357,7 @@ export class DropDeckStack extends Stack {
     // ---- API ----
     const api = new HttpApi(this, 'Api', {
       corsPreflight: {
-        allowOrigins: [siteUrl, ...devOrigins],
+        allowOrigins: [...siteOrigins, ...devOrigins],
         allowMethods: [CorsHttpMethod.ANY],
         allowHeaders: ['authorization', 'content-type', 'idempotency-key'],
         maxAge: Duration.hours(1),
@@ -403,6 +436,12 @@ export class DropDeckStack extends Stack {
     }
 
     new CfnOutput(this, 'SiteUrl', { value: siteUrl });
+    new CfnOutput(this, 'CloudFrontDomain', { value: distribution.distributionDomainName, description: 'CNAME target for your domain at the registrar' });
+    if (props.sesDomain) {
+      // SES domain identity with Easy DKIM: add these three CNAMEs at the registrar, then SES marks it verified.
+      const identity = new EmailIdentity(this, 'MailDomain', { identity: Identity.domain(props.sesDomain) });
+      identity.dkimRecords.forEach((r, i) => new CfnOutput(this, `DkimRecord${i + 1}`, { value: `${r.name} CNAME ${r.value}` }));
+    }
     new CfnOutput(this, 'ApiUrl', { value: api.apiEndpoint });
     new CfnOutput(this, 'UserPoolId', { value: userPool.userPoolId });
     new CfnOutput(this, 'UserPoolClientId', { value: userPoolClient.userPoolClientId });

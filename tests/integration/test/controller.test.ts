@@ -2,7 +2,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { keys, usageMonth, type Drop, type PublicState } from '@dropdeck/shared';
 import { activeHolds, createTable, enabled, http, liveDrop, parse, shardSold, type Res } from './harness.js';
 
-vi.mock('../../../services/controller/src/publish.js', () => ({ writeState: vi.fn(), writeShopJson: vi.fn() }));
+vi.mock('../../../services/controller/src/publish.js', () => ({ writeState: vi.fn(), writeShopJson: vi.fn(), writeFeaturedJson: vi.fn() }));
 vi.mock('../../../services/controller/src/schedule.js', () => ({ upsertTickSchedule: vi.fn(), deleteTickSchedule: vi.fn() }));
 
 const { handler: ticket } = await import('../../../services/ticket/src/handler.js');

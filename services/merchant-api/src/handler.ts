@@ -63,6 +63,10 @@ export async function handler(event: Event) {
           cur?.slugClaimed && cur.slug !== saved.slug
             ? pub.deleteShopJson(cur.slug).catch((e) => console.error(JSON.stringify({ level: 'error', msg: 'old shop.json delete failed', err: String(e) })))
             : undefined,
+          // Listed shops carry their new name and logo to the homepage; turning the listing off takes them away.
+          saved.listed || cur?.listed
+            ? pub.refreshFeatured(saved, drops).catch((e) => console.error(JSON.stringify({ level: 'error', msg: 'featured refresh failed', err: String(e) })))
+            : undefined,
         ]);
         return json(200, saved);
       }

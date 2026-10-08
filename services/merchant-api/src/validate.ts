@@ -105,7 +105,7 @@ export function validateDropInput(body: Record<string, unknown>, partial = false
   return out;
 }
 
-type ProfileField = 'name' | 'slug' | 'logoUrl' | 'coverUrl' | 'colour' | 'theme' | 'tagline' | 'paynow' | 'fulfilmentNote';
+type ProfileField = 'name' | 'slug' | 'logoUrl' | 'coverUrl' | 'colour' | 'theme' | 'tagline' | 'paynow' | 'fulfilmentNote' | 'listed';
 
 /** PUT /m/profile body. A field left out keeps its value; null (or '') clears an optional field. */
 export type ProfilePatch = { [K in ProfileField]?: MerchantProfile[K] | null };
@@ -139,6 +139,10 @@ export function validateProfileInput(body: Record<string, unknown>, t: string): 
   optional('tagline', (v) => str(v, 'tagline', 1, TAGLINE_MAX));
   optional('paynow', (v) => str(v, 'paynow', 1, 40));
   optional('fulfilmentNote', (v) => str(v, 'fulfilmentNote', 1, 300));
+  if (body.listed !== undefined) {
+    if (typeof body.listed !== 'boolean') fail('listed must be true or false');
+    out.listed = body.listed as boolean;
+  }
   return out;
 }
 

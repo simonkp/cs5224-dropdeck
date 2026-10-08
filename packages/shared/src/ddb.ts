@@ -1,10 +1,12 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
-  BatchGetCommand, DynamoDBDocumentClient, GetCommand, QueryCommand, UpdateCommand, type BatchGetCommandOutput,
+  BatchGetCommand, DeleteCommand, DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, UpdateCommand,
+  type BatchGetCommandOutput,
 } from '@aws-sdk/lib-dynamodb';
 import { ApiError } from './errors.js';
 import { keys } from './keys.js';
-import type { Drop, Hold, MerchantProfile } from './types.js';
+import { featuredEntry, isFeaturable } from './public.js';
+import type { Drop, FeaturedDrop, Hold, MerchantProfile } from './types.js';
 
 /**
  * Table access shared by the buyer-path services (ticket, claim, checkout, controller).
@@ -161,4 +163,35 @@ export async function unitsSold(drop: Drop): Promise<Record<string, number>> {
     }
   }
   return sold;
+}
+
+/**
+ * Keep the homepage partition in step with some of a shop's drops: listed and eligible drops are written (with the
+ * shop's current name and logo), everything else is removed. Items expire 14 days after the drop ends.
+ */
+export async function syncFeatured(profile: MerchantProfile | undefined, drops: Drop[]): Promise<void> {
+  await Promise.all(drops.map(async (d) => {
+    const key = keys.featured(d.openAt, d.tenantId, d.dropId);
+    if (profile && isFeaturable(profile, d)) {
+      await ddb.send(new PutCommand({
+        TableName: table(),
+        Item: { ...key, type: 'Featured', ...featuredEntry(profile, d), ttl: Math.floor(Date.parse(d.endAt) / 1000) + 14 * 86_400 },
+      }));
+    } else {
+      await ddb.send(new DeleteCommand({ TableName: table(), Key: key }));
+    }
+  }));
+}
+
+export async function listFeatured(): Promise<FeaturedDrop[]> {
+  const out: FeaturedDrop[] = [];
+  let start: Record<string, unknown> | undefined;
+  do {
+    const r = await ddb.send(new QueryCommand({
+      TableName: table(), KeyConditionExpression: 'PK = :pk', ExpressionAttributeValues: { ':pk': 'FEATURED' }, ExclusiveStartKey: start,
+    }));
+    out.push(...(r.Items ?? []).map((i) => strip<FeaturedDrop>(i)!));
+    start = r.LastEvaluatedKey;
+  } while (start);
+  return out;
 }

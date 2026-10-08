@@ -71,6 +71,7 @@ export function ShopSettings({ ctx }: { ctx: ConsoleCtx }) {
   const [slugCheck, setSlugCheck] = useState<SlugCheck>({ state: 'idle' });
   const [paynow, setPaynow] = useState(p?.paynow ?? '');
   const [note, setNote] = useState(p?.fulfilmentNote ?? '');
+  const [listed, setListed] = useState(p?.listed ?? false);
   const [busy, setBusy] = useState(false);
   const [share, setShare] = useState<ShareTarget | null>(null);
 
@@ -108,7 +109,7 @@ export function ShopSettings({ ctx }: { ctx: ConsoleCtx }) {
         method: 'PUT',
         body: {
           name, slug, colour, theme,
-          tagline: tagline.trim() || null, paynow: paynow.trim() || null, fulfilmentNote: note.trim() || null,
+          tagline: tagline.trim() || null, paynow: paynow.trim() || null, fulfilmentNote: note.trim() || null, listed,
           logoUrl: logoUrl ?? null, coverUrl: coverUrl ?? null,
         },
       });
@@ -195,6 +196,14 @@ export function ShopSettings({ ctx }: { ctx: ConsoleCtx }) {
               {slugCheck.state === 'ok' && <span className="flex items-center gap-1.5 text-[13px] font-bold text-ok"><Check className="size-3.5" strokeWidth={2.8} />Available</span>}
               {slugCheck.state === 'bad' && <span className="flex items-center gap-1.5 text-[13px] font-bold text-danger" role="alert"><X className="size-3.5" strokeWidth={2.8} />{slugCheck.text}</span>}
               {slugCheck.state === 'idle' && p && <span className="text-[13px] font-medium text-muted">Changing it breaks links you have already shared.</span>}
+            </label>
+            <label className="flex cursor-pointer items-start justify-between gap-4 rounded-2xl bg-bg p-3.5">
+              <span className="flex flex-col gap-0.5">
+                <span className="text-sm font-semibold">List my drops on the DropDeck homepage</span>
+                <span className="text-[13px] text-muted">Your upcoming and live drops can appear under &ldquo;See a live drop&rdquo; on dropdeck&apos;s front page. Off unless you turn it on.</span>
+              </span>
+              <input type="checkbox" role="switch" checked={listed} onChange={(e) => setListed(e.target.checked)} className="peer sr-only" />
+              <span aria-hidden className="relative mt-0.5 h-7 w-12 shrink-0 rounded-full bg-field transition peer-checked:bg-ok peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-ink after:absolute after:top-0.5 after:left-0.5 after:size-6 after:rounded-full after:bg-white after:shadow after:transition peer-checked:after:translate-x-5" />
             </label>
           </Section>
 
