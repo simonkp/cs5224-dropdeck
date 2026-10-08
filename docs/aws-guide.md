@@ -46,15 +46,16 @@ CloudFront setting up its global network.
 
 | Kind | Count | What it is for |
 | --- | --- | --- |
-| Lambda functions | 7 | Our 5 (Ticket, Claim, Checkout, MerchantApi, Controller) plus 2 CDK helpers: one uploads the website, one empties the bucket when the stack is deleted |
-| API Gateway routes | 21 | Every buyer and merchant endpoint (see [`api.md`](api.md)), with the permissions that let them call the functions |
-| IAM roles and policies | 15 | What each function is allowed to do, e.g. Claim may write to the table but not to S3 |
+| Lambda functions | 8 | Our 6 (Ticket, Claim, Checkout, MerchantApi, Controller, AdminApi) plus 2 CDK helpers: one uploads the website, one empties the bucket when the stack is deleted |
+| API Gateway routes | 26 | Every buyer and merchant endpoint (see [`api.md`](api.md)), with the permissions that let them call the functions |
+| IAM roles and policies | 17 | What each function is allowed to do, e.g. Claim may write to the table but not to S3 |
 | DynamoDB table | 1 | All data: drops, stock, holds, orders |
-| S3 bucket + CloudFront | 8 | The website and the `drop.json` / `state.json` files, served from the edge, with their caching rules |
-| Cognito | 3 | Merchant sign-in: user pool, login domain, app client |
+| S3 bucket + CloudFront | 8 | The website, the published `drop.json` / `state.json` / `shop.json` / `featured.json` files and uploaded images, served from the edge, with their caching rules and security headers |
+| Cognito | 5 | Merchant sign-in: user pool, login domain, app client, sign-in page branding, `operators` group |
 | Scheduler group | 1 | Holds each drop's "open" and "tick" schedules (created at run time by our code, not by the stack) |
-| Log groups | 5 | One per function, kept a month |
+| Log groups | 6 | One per function, kept a month |
 | Budget | 1 | US$10 a month alarm, staging only |
+| SES email identity | 0 or 1 | Only once our domain is set (`docs/domain-setup.md`); the site certificate is made by hand in us-east-1 |
 
 ## Our stacks
 

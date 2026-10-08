@@ -18,5 +18,6 @@ One file per decision: context, decision, options rejected, consequences, and wh
 | 0012 | [Mobile-first UI with Tailwind and shadcn/ui; each shop brands its pages](0012-ui-refresh-and-shop-branding.md) | 2026-10-06 |
 | 0013 | [Operators, usage metering and plan limits](0013-operators-metering-plans.md) | 2026-10-07 |
 | 0014 | [Buyers' order data is deleted 180 days after the drop](0014-buyer-data-retention.md) | 2026-10-07 |
+| 0015 | [A public homepage with open sign-up; shops opt in to being listed](0015-homepage-and-open-sign-up.md) | 2026-10-08 |
 
 To add one: copy the newest file, bump the number, keep it under a page.

@@ -205,7 +205,9 @@ describe('own domain (optional)', () => {
       domainName: 'drops.example.com', certificateArn: 'arn:aws:acm:us-east-1:123456789012:certificate/abc',
       sesDomain: 'example.com', mailFrom: 'DropDeck <codes@example.com>', signupEmailFromSes: true,
     });
-    t.hasResourceProperties('AWS::CloudFront::Distribution', { DistributionConfig: Match.objectLike({ Aliases: ['drops.example.com'] }) });
+    t.hasResourceProperties('AWS::CloudFront::Distribution', { DistributionConfig: Match.objectLike({
+      Aliases: ['drops.example.com'], ViewerCertificate: Match.objectLike({ MinimumProtocolVersion: 'TLSv1.2_2021' }),
+    }) });
     t.hasResourceProperties('AWS::SES::EmailIdentity', { EmailIdentity: 'example.com' });
     t.hasResourceProperties('AWS::Cognito::UserPool', { EmailConfiguration: Match.objectLike({ EmailSendingAccount: 'DEVELOPER' }) });
     const json = JSON.stringify(t.toJSON());

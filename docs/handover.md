@@ -1,6 +1,6 @@
 # Handover
 
-State of the build on 5 Oct 2026. **Anyone on the team can contribute from now on**: pick a known gap, an
+State of the build on 8 Oct 2026. **Anyone on the team can contribute from now on**: pick a known gap, an
 experiment or a part of the study, work on a branch, and open a pull request to `main`. CI runs every test on the
 pull request, and deploys staging once it is merged. Everything you need to get going is on this page.
 
@@ -14,15 +14,21 @@ New to AWS or CloudFormation? Start with [`aws-guide.md`](aws-guide.md).
 ![DropDeck architecture: the crowd polls the edge; only joins, claims and checkouts reach Lambda](architecture.svg)
 
 Waiting buyers only fetch cached files from CloudFront, so a bigger crowd costs almost nothing at the origin. The
-merchant API writes `drop.json` and the open schedule; the controller writes `state.json` every tick; checkout sends
-email codes (log mode for now). The picture is [`architecture.svg`](architecture.svg), also usable in the report.
+merchant API writes `drop.json` and the open schedule; the controller writes `state.json` every tick; both keep each
+shop page (`shop.json`) and the homepage list (`featured.json`) current; checkout sends email codes (log mode for now). The picture is [`architecture.svg`](architecture.svg), also usable in the report.
 
 ## Where things stand
 
 The full drop lifecycle is built, deployed and tested end to end on AWS:
 
-- **Merchant console** (`/m/`): sign-in, shop profile with PayNow details, drop editor, schedule, unschedule,
-  cancel, duplicate, live view, orders with paid / no-show reconciliation, CSV export, post-drop report.
+- **Homepage** (`/`): what DropDeck is, how a drop works, pricing from the plan data, "See a live drop" (up to three
+  drops from shops that opted in), and sign-up straight to Cognito's create-account screen. `/privacy/` for buyers.
+- **Merchant console** (`/m/`): sign-in, a getting-started checklist for new shops, shop profile with PayNow details
+  and branding (logo, cover, colour, light or dark), shop link and QR, the homepage listing switch, drop editor,
+  schedule, unschedule, cancel, duplicate, live view, orders with paid / no-show reconciliation, CSV export,
+  post-drop report, plan and usage.
+- **Shop page** (`/s/{slug}/`): a shop's live, upcoming and recent drops, in its own branding.
+- **Operators** (`/ops/`, `pnpm ops`): shops, usage, plans, invoice preview; deleting a shop's data (decision 0013).
 - **Buyer page** (`/d/{tenant}/{drop}/`): countdown, random draw before open then first-come, queue position,
   claim, hold countdown, email code, PayNow confirmation. Progress survives a refresh.
 - **Back end**: ticket, claim, checkout, merchant API, and a controller that opens drops, publishes the watermark,
@@ -32,8 +38,8 @@ Evidence, all in the repo:
 
 | What | Where | Result |
 | --- | --- | --- |
-| Unit tests | `pnpm test` | 50 |
-| Integration tests (real handlers, DynamoDB Local) | `pnpm test:int` | 31; also a CI job on every push |
+| Unit tests | `pnpm test` | 108 |
+| Integration tests (real handlers, DynamoDB Local) | `pnpm test:int` | 37; also a CI job on every push |
 | Oversell on AWS | `eval/results/2026-10-05-oversell/` | 200 buyers / 20 units and 500 / 50: sold exactly min(N, M) |
 | Lifecycle on AWS (open, draw, claim, expiry, cancel, close) | `eval/results/2026-10-05-e2e/` | all 24 steps pass |
 
@@ -44,12 +50,13 @@ Evidence, all in the repo:
 | `packages/shared` | Types, keys, tokens, admission maths, email normalisation. `@dropdeck/shared/ddb` (table access, conditional hold release) and `/secrets` (SSM keys) are server-only subpaths |
 | `services/ticket`, `claim`, `checkout` | Buyer API. `checkout/src/otp.ts` and `mailer.ts` are the email code |
 | `services/controller` | Scheduler target: `handler.ts` (open, tick loop), `ops.ts` (sweep, sold-out, close) |
-| `services/merchant-api` | Console API. `reports.ts` builds the report and CSV |
-| `apps/web` | Next.js static export. `app/d/` buyer page, `app/m/` console, `lib/` config, auth (PKCE), API client |
+| `services/merchant-api` | Console API. `reports.ts` builds the report and CSV; `publish.ts` writes the public files |
+| `services/admin-api` | Operator API (`/admin/*`), for the `operators` Cognito group only |
+| `apps/web` | Next.js static export. `app/page.tsx` + `app/landing/` homepage, `app/d/` buyer page, `app/s/` shop page, `app/m/` console, `app/ops/` operators, `lib/` config, auth (PKCE), API client |
 | `infra` | CDK: `DropDeck-<stage>` and the one-off `DropDeck-GithubOidc` |
 | `tests/integration` | In-process handlers against DynamoDB Local |
 | `eval` | `oversell.ts`, `e2e.ts`, `seed.ts`, merchant study kit, results |
-| `scripts` | `put-secrets.sh`, `test-int.sh` |
+| `scripts` | `put-secrets.sh`, `test-int.sh`, `demo-reset.sh` |
 
 ## Set up a machine
 
@@ -180,7 +187,7 @@ Staging's data (drops, orders) does not move with it; load demo data with `pnpm 
 | Logs | CloudWatch Logs `DropDeck-<stage>-<Function>Logs…`; metric lines are listed at the end of `api.md` |
 | Scheduler lag | Logs Insights on the controller: `filter msg = "opened" \| stats max(lagMs)` |
 | Re-deploy the GitHub role | `npx cdk deploy DropDeck-GithubOidc -c githubRepo=simonkp/cs5224-dropdeck -c githubSubPrefix=repo:simonkp@5468350/cs5224-dropdeck@1405294986` (staging's account) |
-| Real email | Verify a domain in SES, then deploy with `-c mailFrom="DropDeck <codes@your.domain>"`; for staging, add it to the `cdk deploy` line in `.github/workflows/ci.yml` |
+| Real email | Verify a domain in SES, then set `mailFrom` for the stage under `stageSettings` in `infra/cdk.json` (CI deploys staging with it); `docs/domain-setup.md` step 3 |
 
 CloudTrail lookups are denied in the sandbox: diagnose from CI logs and Lambda logs.
 
@@ -204,9 +211,10 @@ and if you change a guard, break it on purpose once to check a test fails.
 
 ## Known gaps, in priority order
 
-1. **Email is in log mode on every stage** (`docs/domain-setup.md` has the full sequence once the domain is bought). Before the merchant sessions (from 26 Oct) and the cohort drop
-   (30 Oct): buy a domain, verify it in SES with DKIM, request SES production access (staging's URL works for the
-   form), then set `mailFrom` for staging. Otherwise run those drops with buyer check "None". The SES branch of
+1. **Email is in log mode on every stage.** Before the merchant sessions (from 26 Oct) and the cohort drop (30 Oct):
+   buy a domain and follow `docs/domain-setup.md` (certificate, DKIM, SES production access, then `mailFrom`). The
+   stack is ready; only the settings are missing. AWS approves production access, so request it the day the domain
+   is bought. Otherwise run those drops with buyer check "None". The SES branch of
    the mailer has never run; the Resend fallback needs a key at `/dropdeck/<stage>/resend-api-key` and
    `-c resendFallback=true`.
 2. **Sandbox lease.** Unknown end date; the account is wiped at the end. If it ends before marking, staging and
@@ -222,8 +230,10 @@ and if you change a guard, break it on purpose once to check a test fails.
 6. **Misuse defences beyond the per-email limit** (named, not built): proof-of-work at ticket issue, WAF per-IP
    limits, Turnstile. Extra sessions buy better odds, not more orders. `docs/security.md` lists what is in place
    and the accepted risks.
-7. **Merchant sign-up is open** to anyone with an email. Plans are enforced at `/schedule` and usage is metered
-   (decision 0013), but no payment is taken; the ops page shows an invoice preview.
+7. **Merchant sign-up is open** from the homepage to anyone with an email (decision 0015). New shops start on
+   Starter; plans are enforced at `/schedule` and usage is metered (decision 0013), but no payment is taken; the ops
+   page shows an invoice preview. Cognito's own sender allows about 50 sign-up emails a day until sign-up email moves
+   to SES (`docs/domain-setup.md` step 5).
 8. **Small things:** no refunds or order edits beyond status, uploaded images are never cleaned up, the console has no
    pagination for very large order lists, and `PATCH` on a Scheduled drop cannot move its time (unschedule first,
    by design).

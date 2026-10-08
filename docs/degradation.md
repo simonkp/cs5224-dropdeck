@@ -23,6 +23,7 @@ conditional write.
 | Holds still open when the drop closes | Their buyers can still check out until the hold expires | The tick schedule is deleted on close, so holds that expire afterwards are never swept and the stock counters overstate sales | By design: merchant reports and exports count orders, never stock counters |
 | A release or a not-yet-indexed hold lands between the sold-out read and the open-hold count | Drop closes a moment early | Close is decided from two reads in sequence (shard counters, then the GSI count) | Undersell only; a buyer already holding stock can still confirm |
 | S3 write of `state.json` fails | Position stops updating | Logged; the next tick rewrites the whole object | Next tick |
+| Write of `shop.json` or the homepage list (`featured.json`) fails | The shop page or homepage shows a drop's old state; the drop page itself is unaffected | Logged, never fails the merchant's request or the tick; both are rebuilt from the table on the shop's next change | The shop's next drop change or profile save |
 | CloudFront serves stale `state.json` | Position lags by up to 5 s | Cache TTL is 1–5 s by design; claims do not depend on it | Within the TTL |
 | Burst beyond stage throttle (1,000 rps, 2,000 burst) | 429 on ticket or claim | API Gateway sheds load before Lambda or DynamoDB | Buyer retries; limits re-tuned from the 10× load test |
 | SES unavailable (Phase 4) | Email code does not arrive | Resend fallback behind the same mailer interface (decision 0002) | Fallback path |

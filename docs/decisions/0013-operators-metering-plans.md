@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-07
-- **Decided by:** Simon, after reviewing the architecture against Lecture 8 (example SaaS applications)
+- **Decided by:** Simon, after an architecture review (scaling, cost, what a SaaS provider needs)
 
 ## Context
 

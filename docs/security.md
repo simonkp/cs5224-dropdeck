@@ -25,7 +25,9 @@ A one-page threat model: what we protect, from whom, how, and what we have chose
 | Operator actions | `/admin/*` requires the Cognito group `operators`, checked in the handler on every call; deletion is a typed-confirmation CLI |
 | Malicious uploads | Type checked from the bytes (PNG, JPEG, WebP; never SVG), 1 MB cap, 100 a day per shop, content-hashed keys, served with `nosniff` |
 | Script injection, clickjacking | React escapes all shop text. CSP (`frame-ancestors 'none'`, `object-src 'none'`, `connect-src` limited to our API and Cognito), `X-Frame-Options: DENY`, HSTS, `nosniff`, a strict referrer policy and a permissions policy on every page and JSON file |
-| A bug overwriting the web app | Functions can write only `d/`, `s/` and `b/` in the bucket; only the deploy writes the app files |
+| A bug overwriting the web app | Functions can write only `d/`, `s/`, `b/` and `p/` in the bucket; only the deploy writes the app files |
+| Fake shops from open sign-up | A new shop starts on Starter (2 drops, 200 units a month, enforced at `/schedule`); operators see every shop and can delete one; nothing is listed on the homepage unless the shop turns it on |
+| A shop shown on DropDeck's homepage without asking | Listing is off by default and switched on per shop; `featured.json` holds only what that shop's page already shows publicly |
 | Account enumeration | Cognito hides whether an email has an account |
 | Floods and denial of wallet | Shield Standard on CloudFront (free); polling served from the edge cache with a fixed URL; API throttle of 1,000 requests a second, with ticket floods held to their own 600 and uploads to 5; budget alarm at US$5 and US$10 |
 | Losing data | Point-in-time recovery and deletion protection on the staging and prod table; the S3 bucket is retained on those stages |
@@ -45,7 +47,7 @@ A one-page threat model: what we protect, from whom, how, and what we have chose
 - **No WAF.** It costs money per poll and needs a second stack in us-east-1. If a drop is attacked, follow the upgrade path in `docs/cost-bom.md` (WAF on an API-only distribution, about US$6 a month).
 - **`'unsafe-inline'` scripts in the CSP.** Next.js's static export inlines its bootstrap script. There is no user-supplied HTML anywhere, so the inline allowance has nothing to inject. Hashing the inline scripts at build time would remove it.
 - **Uploads are served from the same origin as the console.** They are type-checked and served with nosniff, so they cannot run. A separate image domain would remove even that.
-- **TLS policy.** The default `*.cloudfront.net` certificate fixes it. A custom domain would allow TLSv1.2_2021 only.
+- **TLS policy.** The default `*.cloudfront.net` certificate fixes it. On our own domain the stack sets TLSv1.2_2021 as the minimum (`docs/domain-setup.md`).
 - **No MFA for merchants yet.** Optional TOTP is free on our Cognito plan, but managed login offers no way to enrol, so it needs a "set up authenticator" screen in the console. SMS MFA costs money per message.
 - **Signing-key rotation.** It is manual: create new SSM values, deploy. Tickets and holds issued before the rotation stop verifying, so rotate between drops.
 - **Extra browser sessions improve a buyer's odds in the draw, but not the number of orders.** Proof-of-work or Turnstile at ticket issue would raise that cost; not built.

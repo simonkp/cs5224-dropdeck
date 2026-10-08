@@ -9,8 +9,7 @@ import { CfnBudget } from 'aws-cdk-lib/aws-budgets';
 import {
   AllowedMethods, CachePolicy, Distribution, Function as CfFunction, FunctionCode, FunctionEventType,
   HeadersFrameOption, HeadersReferrerPolicy, ResponseHeadersPolicy, ViewerProtocolPolicy, CacheQueryStringBehavior,
-  CacheHeaderBehavior, CacheCookieBehavior,
-} from 'aws-cdk-lib/aws-cloudfront';
+  CacheHeaderBehavior, CacheCookieBehavior, SecurityPolicyProtocol } from 'aws-cdk-lib/aws-cloudfront';
 import { S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import {
   AccountRecovery, CfnManagedLoginBranding, CfnUserPoolGroup, FeaturePlan, ManagedLoginVersion, OAuthScope, UserPool,
@@ -193,7 +192,11 @@ export class DropDeckStack extends Stack {
     const distribution = new Distribution(this, 'Cdn', {
       defaultRootObject: 'index.html',
       ...(props.domainName && props.certificateArn
-        ? { domainNames: [props.domainName], certificate: Certificate.fromCertificateArn(this, 'SiteCert', props.certificateArn) }
+        ? {
+          domainNames: [props.domainName],
+          certificate: Certificate.fromCertificateArn(this, 'SiteCert', props.certificateArn),
+          minimumProtocolVersion: SecurityPolicyProtocol.TLS_V1_2_2021,
+        }
         : {}),
       defaultBehavior: {
         origin,

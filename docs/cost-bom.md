@@ -1,23 +1,23 @@
 # Cost: bill of materials and platform comparison
 
-What DropDeck costs to run, what a drop costs, and how that compares with the classic server design from the lectures and with running it on our own servers. The tables between the markers come from `eval/cost-model.ts`; change an assumption there and run `pnpm --filter @dropdeck/eval cost -- --write`. Once a real drop is instrumented, `--measured <file>` replaces the modelled workload.
+What DropDeck costs to run, what a drop costs, and how that compares with a classic server-based design and with running it on our own servers. The tables between the markers come from `eval/cost-model.ts`; change an assumption there and run `pnpm --filter @dropdeck/eval cost -- --write`. Once a real drop is instrumented, `--measured <file>` replaces the modelled workload.
 
-## How the architecture maps onto the lecture's design
+## How the architecture maps onto a classic web-app design
 
-Lecture 8's video-sharing SaaS splits into stages (upload, encode, stream), puts EC2 web servers behind a load balancer with auto scaling, joins the stages with a queue, and serves viewers from a CDN. DropDeck has the same parts, as managed services that cost nothing while idle:
+A classic scalable web app splits its work into stages (content in, heavy processing, delivery), puts EC2 web servers behind a load balancer with auto scaling, joins the stages with a queue, and serves readers from a CDN. DropDeck has the same parts, as managed services that cost nothing while idle:
 
-| Lecture piece | DropDeck | Service model |
+| Classic piece | DropDeck | Service model |
 | --- | --- | --- |
-| Upload stage (users send content in) | Merchant console → merchant API → `drop.json`, `shop.json`, uploaded images in S3 | PaaS (API Gateway, Lambda), IaaS (S3) |
-| Encoding stage (heavy, not user-facing) | The burst: ticket, claim and checkout functions writing sharded DynamoDB counters; the controller ticking | PaaS (Lambda, DynamoDB, EventBridge Scheduler) |
-| Streaming via CDN | CloudFront serves the pages, `state.json` (the waiting room) and photos from the edge | SaaS-style managed CDN |
+| Content in (users send data) | Merchant console → merchant API → `drop.json`, `shop.json`, `featured.json` (homepage list), uploaded images in S3 | PaaS (API Gateway, Lambda), IaaS (S3) |
+| Heavy processing (not user-facing) | The burst: ticket, claim and checkout functions writing sharded DynamoDB counters; the controller ticking | PaaS (Lambda, DynamoDB, EventBridge Scheduler) |
+| Delivery via CDN | CloudFront serves the pages, `state.json` (the waiting room) and photos from the edge | SaaS-style managed CDN |
 | Load balancer + EC2 auto scaling | API Gateway + Lambda: scales per request, nothing to provision | PaaS |
 | Queue between stages (SQS) | EventBridge Scheduler opens drops; the controller "messages" every waiting buyer by publishing one cached `state.json` | PaaS |
 | Users' web browser / media player | Phone browser; the delivery channel, not part of the system | (client) |
 
 **No rework needed.**
 - The burst stage never touches a server we run.
-- The CDN carries the read load, which is the lecture's main point about the streaming stage.
+- The CDN carries the read load, which is where a crowd's traffic is.
 - A load balancer alone would cost about US$24 a month with nothing happening.
 
 ## WAF, DDoS and autoscaling (decided)
@@ -27,16 +27,16 @@ Lecture 8's video-sharing SaaS splits into stages (upload, encode, stream), puts
 - **WAF is not added.**
   - It cannot attach to an API Gateway HTTP API. On the main CloudFront distribution it would also inspect every waiting-room poll: US$0.60 per million, about +US$0.50 per reference drop, plus US$6 a month.
   - The upgrade path, if a drop is ever attacked:
-    - **Fixed price:** WAF with an IP rate limit on a separate, API-only CloudFront distribution. That is US$6 a month and fractions of a cent per drop (platform C below).
+    - **Fixed price:** WAF with an IP rate limit on a separate, API-only CloudFront distribution. That is US$6 a month and fractions of a cent per drop (platform B below).
     - **Flat rate:** a CloudFront flat-rate plan. Pro is US$15 a month for 10M requests, with WAF included and no overage charges; Business is US$200 a month for 125M.
 - **Autoscaling** is built into Lambda, API Gateway and on-demand DynamoDB.
   - The ceiling that matters is the account's Lambda concurrency quota. In the sandbox it is **400** (checked 2026-10-07 with `aws lambda get-account-settings`). At about 80 ms per call that allows roughly 5,000 API calls a second, well above the 1,000-a-second stage throttle.
-  - Cold starts at the opening second can be removed with provisioned concurrency for just the drop window (about US$0.04 per drop, included in platform C). Whether it is needed comes from the elasticity measurement.
+  - Cold starts at the opening second can be removed with provisioned concurrency for just the drop window (about US$0.04 per drop, included in platform B). Whether it is needed comes from the elasticity measurement.
 
 ## What drives the cost
 
 - **Waiting-room polling is the cost.** Every buyer's page re-reads `state.json` from CloudFront, so cost follows buyers × minutes on the page × polls a minute. Everything behind the API costs a few cents per drop, because it is bounded by stock, not by the crowd.
-- **Adaptive polling** (`pollInterval` in `apps/web/app/d/buyer.ts`) polls fast only when something can change for that buyer:
+- **Adaptive polling, as built** (`pollInterval` in `apps/web/app/d/buyer.ts`; it replaced a fixed 2 s poll) polls fast only when something can change for that buyer:
   - every 30 s during a far-off countdown
   - every 2 s from 2½ minutes before the queue opens
   - every 5 s when more than 300 people are ahead
@@ -54,10 +54,10 @@ _Generated by `eval/cost-model.ts` (modelled inputs). Prices: AWS on-demand, ap-
 
 ### Per drop (reference drop: 200 units, 5,000 buyer sessions)
 
-| Item | As built: quantity | As built | Adaptive polling: quantity | Adaptive |
+| Item | As built (adaptive): quantity | As built | Fixed 2 s (replaced): quantity | Fixed 2 s |
 | --- | --- | --- | --- | --- |
-| CloudFront requests (pages + state.json polls) | 1.90M (1.80M polls) | $2.27 | 0.81M (0.71M polls) | $0.97 |
-| CloudFront data out | 3.2 GB | $0.39 | 2.6 GB | $0.31 |
+| CloudFront requests (pages + state.json polls) | 0.81M (0.71M polls) | $0.97 | 1.90M (1.80M polls) | $2.27 |
+| CloudFront data out | 2.6 GB | $0.31 | 3.2 GB | $0.39 |
 | CloudFront Functions (URL rewrite) | 15k | <$0.01 | 15k | <$0.01 |
 | API Gateway (HTTP API) | 7.3k | <$0.01 | 7.3k | <$0.01 |
 | Lambda (ARM, 512 MB) incl. controller | 1.5k GB-s | $0.02 | 1.5k GB-s | $0.02 |
@@ -66,29 +66,28 @@ _Generated by `eval/cost-model.ts` (modelled inputs). Prices: AWS on-demand, ap-
 | EventBridge Scheduler | 46 | <$0.01 | 46 | <$0.01 |
 | SES email codes | 173 | $0.02 | 173 | $0.02 |
 | CloudWatch Logs | 4.3 MB | <$0.01 | 4.3 MB | <$0.01 |
-| **Total per drop** |  | **$2.73** |  | **$1.35** |
-| With the always-free CloudFront allowance (1 drop a month) |  | $0.46 |  | $0.38 |
+| **Total per drop** |  | **$1.35** |  | **$2.73** |
+| With the always-free CloudFront allowance (1 drop a month) |  | $0.38 |  | $0.46 |
 
-Polls per session: 360 at a fixed 2 s, 142 adaptive (2.5× fewer). Session time by phase (assumed): countdown 5 min, near the front 3 min, far back 3 min, holding 1 min.
+Polls per session: 142 as built, against 360 with the fixed 2 s poll it replaced (2.5× fewer). Session time by phase (assumed): countdown 5 min, near the front 3 min, far back 3 min, holding 1 min.
 
 ### Sensitivity: cost per drop against how long buyers keep the page open
 
 | Minutes on page | 5 | 10 | 15 | 20 | 30 |
 | --- | --- | --- | --- | --- | --- |
-| As built (2 s) | $1.40 | $2.35 | $3.30 | $4.25 | $6.15 |
-| Adaptive | $0.82 | $1.20 | $1.58 | $1.96 | $2.71 |
+| As built (adaptive) | $0.82 | $1.20 | $1.58 | $1.96 | $2.71 |
+| Fixed 2 s (replaced) | $1.40 | $2.35 | $3.30 | $4.25 | $6.15 |
 
 ### Fixed monthly cost of each platform (no drops at all)
 
 | Platform | Idle month | Per reference drop | Note |
 | --- | --- | --- | --- |
-| A. DropDeck as built (2 s polling) | $0.05 | $2.73 | pay per use; idle month ≈ storage only |
-| B. DropDeck, adaptive polling | $0.05 | $1.35 | same stack, fewer edge requests |
-| C. B + WAF on the API + warm Lambdas | $6.05 | $1.39 | optional hardening, not built |
-| D. Lecture-style: ALB + EC2 auto scaling + cache | $161 | $1.61 | always-on servers; +4 × c7g.large for 1 h per drop |
-| E. On-premise (sized for the peak) | $550 | $0.05 | fixed cost whatever the traffic; bandwidth in colocation |
+| A. DropDeck as built (adaptive polling) | $0.05 | $1.35 | pay per use; idle month ≈ storage only |
+| B. A + WAF on the API + warm Lambdas | $6.05 | $1.39 | optional hardening, not built |
+| C. Classic servers: ALB + EC2 auto scaling + cache | $161 | $1.61 | always-on servers; +4 × c7g.large for 1 h per drop |
+| D. On-premise (sized for the peak) | $550 | $0.05 | fixed cost whatever the traffic; bandwidth in colocation |
 
-<details><summary>A. DropDeck as built (2 s polling): fixed items</summary>
+<details><summary>A. DropDeck as built (adaptive polling): fixed items</summary>
 
 | Item | Quantity | Per month |
 | --- | --- | --- |
@@ -99,7 +98,7 @@ Polls per session: 360 at a fixed 2 s, 142 adaptive (2.5× fewer). Session time 
 
 </details>
 
-<details><summary>C. B + WAF on the API + warm Lambdas: fixed items</summary>
+<details><summary>B. A + WAF on the API + warm Lambdas: fixed items</summary>
 
 | Item | Quantity | Per month |
 | --- | --- | --- |
@@ -111,7 +110,7 @@ Polls per session: 360 at a fixed 2 s, 142 adaptive (2.5× fewer). Session time 
 
 </details>
 
-<details><summary>D. Lecture-style: ALB + EC2 auto scaling + cache: fixed items</summary>
+<details><summary>C. Classic servers: ALB + EC2 auto scaling + cache: fixed items</summary>
 
 | Item | Quantity | Per month |
 | --- | --- | --- |
@@ -124,7 +123,7 @@ Polls per session: 360 at a fixed 2 s, 142 adaptive (2.5× fewer). Session time 
 
 </details>
 
-<details><summary>E. On-premise (sized for the peak): fixed items</summary>
+<details><summary>D. On-premise (sized for the peak): fixed items</summary>
 
 | Item | Quantity | Per month |
 | --- | --- | --- |
@@ -141,11 +140,10 @@ Merchant mix (assumed): 60% Starter (2 small drops), 30% Growth (4 reference dro
 
 | Platform | 10 shops: cost | 50 shops: cost | 200 shops: cost | 10 shops: gross margin | 50 shops: gross margin | 200 shops: gross margin |
 | --- | --- | --- | --- | --- | --- | --- |
-| A. DropDeck as built (2 s polling) | $40 | $199 | $797 | 92% | 92% | 92% |
-| B. DropDeck, adaptive polling | $20 | $98 | $393 | 96% | 96% | 96% |
-| C. B + WAF on the API + warm Lambdas | $26 | $107 | $411 | 95% | 96% | 96% |
-| D. Lecture-style: ALB + EC2 auto scaling + cache | $185 | $279 | $632 | 63% | 89% | 94% |
-| E. On-premise (sized for the peak) | $550 | $553 | $564 | -9% | 78% | 94% |
+| A. DropDeck as built (adaptive polling) | $20 | $98 | $393 | 96% | 96% | 96% |
+| B. A + WAF on the API + warm Lambdas | $26 | $107 | $411 | 95% | 96% | 96% |
+| C. Classic servers: ALB + EC2 auto scaling + cache | $185 | $279 | $632 | 63% | 89% | 94% |
+| D. On-premise (sized for the peak) | $550 | $553 | $564 | -9% | 78% | 94% |
 | Revenue (all platforms) | $504 | $2519 | $10077 |  |  |  |
 
 At 200 shops that is 500 drops a month (240 reference-size). Margins exclude people, payment fees and taxes.
