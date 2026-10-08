@@ -7,7 +7,8 @@ import { Mark } from '../components/mark';
 import { cn } from '../lib/utils';
 import { PLANS } from '@dropdeck/shared/plans';
 import { FeaturedDrops } from './landing/FeaturedDrops';
-import { SignInLink, StartButton } from './landing/StartButton';
+import { LandingNav } from './landing/LandingNav';
+import { StartButton } from './landing/StartButton';
 
 export const metadata: Metadata = {
   title: 'DropDeck: fair drops for small shops',
@@ -54,14 +55,8 @@ export default function Home() {
       <header className="relative overflow-hidden bg-[#0b0c0f] text-[#f3f3f5]">
         <div aria-hidden className="absolute inset-0 bg-[radial-gradient(rgba(255,255,255,0.07)_1px,transparent_1px)] [background-size:22px_22px]" />
         <div aria-hidden className="absolute -top-40 right-[-10%] size-[520px] rounded-full bg-volt/10 blur-3xl" />
-        <nav className="relative mx-auto flex h-18 max-w-6xl items-center justify-between px-5 py-5">
-          <a href="/" className="flex items-center gap-2.5 text-[#f3f3f5] no-underline"><Mark /><span className="font-display text-xl font-extrabold tracking-tight">dropdeck</span></a>
-          <div className="flex items-center gap-6 text-sm text-[#c7cad1]">
-            <a href="#how" className="hidden text-inherit no-underline hover:text-white sm:inline">How it works</a>
-            <a href="#pricing" className="hidden text-inherit no-underline hover:text-white sm:inline">Pricing</a>
-            <SignInLink className="text-[#f3f3f5] hover:text-volt" />
-          </div>
-        </nav>
+        <LandingNav />
+        <div aria-hidden className="h-16 sm:h-[72px]" />
 
         <div className="relative mx-auto grid max-w-6xl items-center gap-14 px-5 pt-8 pb-20 lg:grid-cols-[1.05fr_1fr] lg:pt-14 lg:pb-28">
           <div className="flex flex-col gap-7">
@@ -137,7 +132,7 @@ export default function Home() {
       </section>
 
       {/* ---------------------------------------------------------------- how it works */}
-      <section id="how" className="relative overflow-hidden bg-[#0b0c0f] px-5 py-20 text-[#f3f3f5] sm:py-28">
+      <section id="how" className="scroll-mt-16 sm:scroll-mt-[72px] relative overflow-hidden bg-[#0b0c0f] px-5 py-20 text-[#f3f3f5] sm:py-28">
         <div aria-hidden className="absolute inset-0 bg-[radial-gradient(rgba(255,255,255,0.05)_1px,transparent_1px)] [background-size:22px_22px]" />
         <div className="relative mx-auto max-w-6xl">
           <div className="mb-14 flex max-w-2xl flex-col gap-3">
@@ -189,7 +184,7 @@ export default function Home() {
       </section>
 
       {/* ---------------------------------------------------------------- pricing */}
-      <section id="pricing" className="px-5 py-20 sm:py-24">
+      <section id="pricing" className="scroll-mt-16 sm:scroll-mt-[72px] px-5 py-20 sm:py-24">
         <div className="mx-auto max-w-6xl">
           <div className="mb-12 flex max-w-2xl flex-col gap-3">
             <Eyebrow>Pricing</Eyebrow>

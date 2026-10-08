@@ -56,7 +56,7 @@ export function FeaturedDrops() {
   }, []);
   if (!drops || drops.length === 0) return null;
   return (
-    <section id="live" className="bg-bg px-5 py-20 sm:py-24">
+    <section id="live" className="scroll-mt-16 sm:scroll-mt-[72px] bg-bg px-5 py-20 sm:py-24">
       <div className="mx-auto max-w-6xl">
         <div className="mb-10 flex flex-wrap items-end justify-between gap-4">
           <div className="flex flex-col gap-3">
