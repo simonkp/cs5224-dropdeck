@@ -1,7 +1,7 @@
 'use client';
 
 import type { Drop, RatePreset, VerificationMode } from '@dropdeck/shared';
-import { Plus, X } from 'lucide-react';
+import { Eye, Plus, X } from 'lucide-react';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { Button } from '../../components/ui/button';
@@ -13,6 +13,9 @@ import { Stepper } from '../../components/ui/stepper';
 import { api } from '../../lib/api';
 import { loadConfig } from '../../lib/config';
 import { time } from '../../lib/format';
+import { DropPreview } from '../../components/drop-preview';
+import { Sheet } from '../../components/ui/dialog';
+import { useUnsaved } from '../../lib/unsaved';
 import { ImagePicker } from './ImagePicker';
 import { ViewHeader, type ConsoleCtx } from './shared';
 
@@ -66,6 +69,9 @@ function Editor({ ctx, drop: d }: { ctx: ConsoleCtx; drop?: Drop }) {
   const [testMail, setTestMail] = useState(false);
   useEffect(() => { loadConfig().then((c) => setTestMail(c.mailMode !== 'ses')).catch(() => undefined); }, []);
 
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const { dirty, markSaved } = useUnsaved(JSON.stringify({ title, description, imageUrl, openAt, lengthMin, entryWindowMin, variants, perBuyerLimit, holdMin, verification, ratePreset }));
+
   const setVariant = (i: number, patch: Partial<VariantRow>) => setVariants((vs) => vs.map((v, j) => (j === i ? { ...v, ...patch } : v)));
   const units = variants.reduce((n, v) => n + (Number(v.stock) || 0), 0);
   const open = new Date(openAt);
@@ -97,6 +103,7 @@ function Editor({ ctx, drop: d }: { ctx: ConsoleCtx; drop?: Drop }) {
       const saved = d
         ? await api<Drop>(`/m/drops/${d.dropId}`, { method: 'PATCH', body })
         : await api<Drop>('/m/drops', { method: 'POST', body });
+      markSaved();
       if (then === 'schedule') {
         try {
           await api(`/m/drops/${saved.dropId}/schedule`, { method: 'POST' });
@@ -127,7 +134,7 @@ function Editor({ ctx, drop: d }: { ctx: ConsoleCtx; drop?: Drop }) {
 
   return (
     <form onSubmit={submit} className="pb-36">
-      <ViewHeader title={d ? 'Edit drop' : 'New drop'} back={() => window.history.back()} />
+      <ViewHeader title={d ? 'Edit drop' : 'New drop'} back={() => ctx.go({ view: 'drops' })} actions={<Button type="button" variant="outline" onClick={() => setPreviewOpen(true)}><Eye />Preview</Button>} sub={dirty ? <span className="text-xs text-muted">Unsaved changes</span> : undefined} />
       <div className="grid gap-3.5 px-4 pt-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-start lg:px-8">
         <div className="flex flex-col gap-3.5">
           {scheduled && <p className="rounded-2xl bg-info-tint px-4 py-3 text-sm font-semibold text-info">This drop is scheduled. To change its time, items or stock, unschedule it first.</p>}
@@ -222,6 +229,9 @@ function Editor({ ctx, drop: d }: { ctx: ConsoleCtx; drop?: Drop }) {
           )}
         </div>
       </div>
+      <Sheet open={previewOpen} onOpenChange={setPreviewOpen} title="Preview your drop" description="Current form values. Save and schedule to publish.">
+        <DropPreview drop={{ tenantId: d?.tenantId ?? '', dropId: d?.dropId ?? '', merchant: ctx.profile ?? { name: 'Your shop' }, title: title || 'Untitled drop', description, imageUrl, variants: variants.map((v,i) => ({ id: v.id ?? String(i), name: v.name || 'Item name', priceCents: Math.round((Number(v.price)||0)*100) })), openAt: valid ? open.toISOString() : new Date().toISOString(), endAt: closes?.toISOString() ?? new Date().toISOString(), entryOpensAt: queueOpens?.toISOString() ?? new Date().toISOString(), perBuyerLimit, holdSec: holdMin*60, admitWindowSec: d?.admitWindowSec ?? 120, verification }} />
+      </Sheet>
     </form>
   );
 }

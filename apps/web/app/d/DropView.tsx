@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { PublicDrop, PublicState } from '@dropdeck/shared';
 import { SearchX } from 'lucide-react';
 import { useDocumentBrand } from '../../components/brand';
+import { Button } from '../../components/ui/button';
 import { Skeleton } from '../../components/ui/skeleton';
 import { time } from '../../lib/format';
-import { Buyer, Ended } from './Buyer';
+import { Buyer, Ended } from './BuyerView';
 import { ClockEstimate, loadSession, pollInterval, queueStatus } from './buyer';
 import {
   CalendarButton, Content, CountdownCard, Footer, Hero, HowItWorks, Page, RuleChips, ShopHeader, StateCard, StatusPill, TitleBlock, VariantGrid,
@@ -29,10 +30,21 @@ export default function DropView() {
   const clock = useRef(new ClockEstimate());
   const [now, setNow] = useState(() => Date.now());
   const [error, setError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  const [stale, setStale] = useState(false);
+  const [offline, setOffline] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
+  useEffect(() => {
+    const update = () => setOffline(!navigator.onLine);
+    update(); window.addEventListener('online', update); window.addEventListener('offline', update);
+    return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update); };
+  }, []);
+  const withStatus = (content: ReactNode) => <>{(stale || offline) && <div role="status" className="relative z-30 flex flex-wrap items-center justify-center gap-2 bg-warn-tint px-4 py-2 text-sm text-warn"><span>{offline ? 'You are offline.' : 'Live updates are delayed.'} {lastUpdated ? `Last updated ${new Date(lastUpdated).toLocaleTimeString()}.` : 'Waiting for live status.'} Your place is saved on this device.</span><Button variant="outline" size="sm" onClick={() => setRetry(n => n+1)}>Retry</Button></div>}{content}</>;
   useDocumentBrand(drop?.merchant);
 
   useEffect(() => {
     if (!ids) return;
+    setError(null);
     fetch(`/d/${ids.t}/${ids.d}/drop.json`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error('Check the link with the shop. It may have been mistyped, or the drop is not scheduled yet.'))))
       .then((d: PublicDrop) => {
@@ -40,7 +52,7 @@ export default function DropView() {
         document.title = `${d.title} · ${d.merchant.name}`;
       })
       .catch((e: Error) => setError(e.message));
-  }, [ids]);
+  }, [ids, retry]);
 
   // Poll the cached state object at a FIXED URL. Never add a cache-busting query string:
   // the CloudFront cache is what keeps polling cost independent of crowd size. How often depends on what can
@@ -52,7 +64,10 @@ export default function DropView() {
     let stop = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let last: PublicState | null = null;
+    let inFlight = false;
     const tick = async () => {
+      if (inFlight || stop) return;
+      inFlight = true;
       clearTimeout(timer);
       try {
         const sentAt = Date.now();
@@ -60,14 +75,17 @@ export default function DropView() {
         const receivedAt = Date.now();
         if (r.ok) {
           const s = (await r.json()) as PublicState;
+          if (stop) return;
+          setStale(false); setLastUpdated(Date.now());
           last = s;
           setState(s);
           // The Date + Age headers say when this copy was really served (a Scheduled drop's state.json is written
           // once and cached, so its serverTime is stale); without them (next dev) fall back to serverTime.
           clock.current.add(r.headers.get('date'), r.headers.get('age'), sentAt, receivedAt);
           setOffset(Math.round(clock.current.ready ? clock.current.offset() : Date.parse(s.serverTime) - receivedAt));
-        }
-      } catch { /* keep the last state */ }
+        } else if (!stop) setStale(true);
+      } catch { if (!stop) setStale(true); }
+      inFlight = false;
       if (stop) return;
       const session = loadSession(ids.t, ids.d);
       const now = Date.now() + (clock.current.ready ? clock.current.offset() : 0);
@@ -85,7 +103,7 @@ export default function DropView() {
       clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [ids]);
+  }, [ids, retry]);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 250);
@@ -104,7 +122,7 @@ export default function DropView() {
   if (error) {
     return (
       <main className="mx-auto flex min-h-dvh max-w-[560px] flex-col justify-center p-4">
-        <StateCard icon={<SearchX />} iconClass="bg-sunken text-muted" title="We couldn't find this drop">{error}</StateCard>
+        <StateCard icon={<SearchX />} iconClass="bg-sunken text-muted" title="We couldn't find this drop">{error}<Button className="mt-4" variant="outline" onClick={() => setRetry(n => n+1)}>Try again</Button></StateCard>
       </main>
     );
   }
@@ -119,10 +137,10 @@ export default function DropView() {
     );
   }
 
-  if (phase === 'open') return <Buyer ids={ids} drop={drop} state={state} serverNow={serverNow} />;
-  if (phase === 'closed' || phase === 'cancelled') return <Ended ids={ids} drop={drop} cancelled={phase === 'cancelled'} />;
+  if (phase === 'open' || (phase === 'closed' && loadSession(ids.t, ids.d)?.stage === 'held')) return withStatus(<Buyer ids={ids} drop={drop} state={state} serverNow={serverNow} />);
+  if (phase === 'closed' || phase === 'cancelled') return withStatus(<Ended ids={ids} drop={drop} cancelled={phase === 'cancelled'} />);
 
-  return (
+  return withStatus(
     <Page header={<ShopHeader drop={drop} />} bar={<CalendarButton drop={drop} />}>
       <Hero drop={drop} />
       <Content>

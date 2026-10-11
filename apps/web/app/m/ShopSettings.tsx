@@ -14,6 +14,8 @@ import { Segmented } from '../../components/ui/segmented';
 import { api, ApiRequestError } from '../../lib/api';
 import { contrastNote, initials, parseHex } from '../../lib/brand';
 import { cn } from '../../lib/utils';
+import { DropPreview } from '../../components/drop-preview';
+import { useUnsaved } from '../../lib/unsaved';
 import { ImagePicker } from './ImagePicker';
 import { ShareSheet, type ShareTarget } from './ShareSheet';
 import { absolute, ViewHeader, type ConsoleCtx } from './shared';
@@ -26,32 +28,6 @@ const slugify = (s: string) => s.toLowerCase().normalize('NFKD').replace(/[^a-z0
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return <Card className="flex flex-col gap-3.5 rounded-[20px] p-4 lg:p-5"><h2 className="font-display text-[17px] font-bold">{title}</h2>{children}</Card>;
-}
-
-/** What buyers will see, drawn with the same pieces as the real page, in the colours being edited. */
-function Preview(props: { name: string; tagline: string; colour: string; theme: ThemeMode; logoUrl?: string; coverUrl?: string }) {
-  const dark = useDarkMode(props.theme);
-  const merchant = { name: props.name || 'Your shop', logoUrl: props.logoUrl };
-  return (
-    <section aria-label="Preview of your drop page" className="flex flex-col items-center gap-2.5 rounded-3xl bg-[#e4e5ea] p-4 dark:bg-[#22242a]">
-      <span className="text-xs font-bold tracking-[0.06em] text-[#5c616b] uppercase">Live preview</span>
-      <BrandScope colour={props.colour} dark={dark} className="w-[260px] overflow-hidden rounded-[22px] shadow-[0_10px_30px_rgba(16,17,20,0.18)]">
-        <div className="flex h-11 items-center gap-2 border-b border-line bg-surface px-3">
-          <ShopLogo merchant={merchant} className="size-[26px] rounded-lg text-[10px]" />
-          <span className="flex min-w-0 flex-col"><span className="truncate text-xs leading-tight font-bold">{merchant.name}</span>{props.tagline && <span className="truncate text-[10px] text-muted">{props.tagline}</span>}</span>
-        </div>
-        <BrandArt src={props.coverUrl} className="h-[90px]" />
-        <div className="flex flex-col gap-2 p-3">
-          <span className="flex h-5 items-center self-start rounded-full bg-brand-tint px-2 text-[10px] font-bold text-brand-text">Queue opens Sat 9:45 AM</span>
-          <span className="font-display text-xl leading-[1.05] font-extrabold">Saturday drop</span>
-          <div className="grid grid-cols-3 gap-1.5">
-            {['02', '14', '37'].map((n, i) => <span key={n} className={cn('tabular rounded-lg bg-brand-soft py-1.5 text-center text-lg font-extrabold', i === 2 && 'text-brand-text')}>{n}</span>)}
-          </div>
-          <span className="flex h-9 items-center justify-center rounded-[10px] bg-brand text-[13px] font-bold text-brand-fg">Join the queue</span>
-        </div>
-      </BrandScope>
-    </section>
-  );
 }
 
 type SlugCheck = { state: 'idle' | 'checking' | 'ok' | 'bad'; text?: string };
@@ -74,6 +50,8 @@ export function ShopSettings({ ctx }: { ctx: ConsoleCtx }) {
   const [listed, setListed] = useState(p?.listed ?? false);
   const [busy, setBusy] = useState(false);
   const [share, setShare] = useState<ShareTarget | null>(null);
+
+  const { dirty, markSaved } = useUnsaved(JSON.stringify({ name, tagline, colour, theme, logoUrl, coverUrl, slug, paynow, note, listed }));
 
   // A new shop's link follows its name until the merchant edits the link themselves.
   useEffect(() => {
@@ -113,6 +91,7 @@ export function ShopSettings({ ctx }: { ctx: ConsoleCtx }) {
           logoUrl: logoUrl ?? null, coverUrl: coverUrl ?? null,
         },
       });
+      markSaved();
       ctx.setProfile(saved);
       toast.success(setup ? 'Your shop is ready. Create your first drop.' : 'Saved. Live pages update within a minute.');
       if (setup) ctx.go({ view: 'new' });
@@ -125,7 +104,9 @@ export function ShopSettings({ ctx }: { ctx: ConsoleCtx }) {
   };
 
   const shopUrl = p?.slugClaimed ? absolute(`/s/${p.slug}/`) : null;
-  const preview = <Preview name={name} tagline={tagline} colour={colour} theme={theme} logoUrl={logoUrl} coverUrl={coverUrl} />;
+  const sample = ctx.drops?.find(d => d.state === 'Scheduled') ?? ctx.drops?.[0];
+  const openAt = sample?.openAt ?? new Date(Date.now()+86400000).toISOString();
+  const preview = <section className="flex flex-col gap-3"><p className="text-xs font-bold uppercase text-muted">Live buyer preview · {dirty ? 'unsaved changes' : 'saved branding'}</p><DropPreview drop={{ tenantId: p?.tenantId ?? '', dropId: sample?.dropId ?? '', merchant: { name: name || 'Your shop', tagline, colour, theme, logoUrl, coverUrl }, title: sample?.title ?? 'Your next drop', description: sample?.description ?? 'Your items and story appear here.', imageUrl: sample?.imageUrl, variants: sample?.variants ?? [{ id: 'sample', name: 'Your item', priceCents: 1200 }], openAt, endAt: sample?.endAt ?? openAt, entryOpensAt: new Date(Date.parse(openAt)-(sample?.entryWindowMin ?? 15)*60000).toISOString(), perBuyerLimit: sample?.perBuyerLimit ?? 2, holdSec: sample?.holdSec ?? 300, admitWindowSec: sample?.admitWindowSec ?? 120, verification: sample?.verification ?? 'email' }} /></section>;
 
   return (
     <form onSubmit={save} className="pb-40 lg:pb-12">
@@ -139,8 +120,8 @@ export function ShopSettings({ ctx }: { ctx: ConsoleCtx }) {
           </>
         )}
       />
-      <div className="grid gap-3.5 px-4 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start lg:gap-6 lg:px-8">
-        <div className="lg:hidden">{preview}</div>
+      <div className="grid gap-3.5 px-4 lg:grid-cols-[minmax(0,1fr)_minmax(300px,390px)] lg:items-start lg:gap-6 lg:px-8">
+        <details className="rounded-2xl border border-line bg-surface p-4 lg:hidden"><summary className="cursor-pointer font-bold">Preview buyer page</summary><div className="mt-4">{preview}</div></details>
         <div className="flex flex-col gap-3.5">
           <Section title="Logo and cover">
             <ImagePicker

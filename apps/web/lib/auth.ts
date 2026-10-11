@@ -77,6 +77,7 @@ async function tokenRequest(params: Record<string, string>): Promise<Session> {
  * login on its create-account form (the /signup endpoint takes the same parameters as /oauth2/authorize).
  */
 export async function signIn(returnTo = '/m/', screen: 'signin' | 'signup' = 'signin'): Promise<void> {
+  if (process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_DROPDECK_DEMO === '1') { location.assign('/m/'); return; }
   const cfg = await loadConfig();
   const verifier = randomString();
   const state = randomString();
@@ -112,6 +113,7 @@ export async function completeSignIn(search: string): Promise<string> {
 
 /** A valid access token, refreshed when within a minute of expiry; null when signed out. */
 export async function getAccessToken(): Promise<string | null> {
+  if (process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_DROPDECK_DEMO === '1') return new URLSearchParams(location.search).get('preview') === 'signed-out' ? null : 'local-preview';
   const s = readSession();
   if (!s) return null;
   if (s.expiresAt - Date.now() > 60_000) return s.accessToken;
@@ -141,6 +143,7 @@ export function signedInGroups(): string[] {
 export const clearSession = () => store.remove(SESSION);
 
 export async function signOut(): Promise<void> {
+  if (process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_DROPDECK_DEMO === '1') { location.assign('/m/?preview=signed-out'); return; }
   store.remove(SESSION);
   const cfg = await loadConfig();
   const q = new URLSearchParams({ client_id: cfg.userPoolClientId, logout_uri: `${window.location.origin}/m/` });

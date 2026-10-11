@@ -60,6 +60,7 @@ function Orders({ ctx, drop }: { ctx: ConsoleCtx; drop: Drop }) {
   const [orders, setOrders] = useState<Order[] | null>(null);
   const [report, setReport] = useState<Report | null>(null);
   const [live, setLive] = useState<Live | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [saving, setSaving] = useState<string | null>(null);
@@ -77,16 +78,16 @@ function Orders({ ctx, drop }: { ctx: ConsoleCtx; drop: Drop }) {
       setOrders(o);
       setReport(r);
       setLive(l);
-      setUpdatedAt(Date.now());
-    } catch (e) {
-      onError(e);
+      setUpdatedAt(Date.now()); setLoadError(false);
+    } catch {
+      setLoadError(true);
     }
-  }, [drop, onError]);
+  }, [drop]);
 
   useEffect(() => {
     void load();
     if (!isLive) return;
-    const id = setInterval(() => void load(), 5000);
+    const id = setInterval(() => { if (document.visibilityState === 'visible') void load(); }, 5000);
     const tick = setInterval(() => setNow(Date.now()), 1000);
     return () => { clearInterval(id); clearInterval(tick); };
   }, [isLive, load]);
@@ -128,6 +129,7 @@ function Orders({ ctx, drop }: { ctx: ConsoleCtx; drop: Drop }) {
 
   return (
     <>
+      {loadError && <div role="status" className="m-4 rounded-xl bg-warn-tint p-3 text-sm text-warn">Could not refresh orders. Last available values shown. <Button variant="outline" size="sm" onClick={() => void load()}>Retry</Button></div>}
       <ViewHeader
         title={drop.title}
         back={() => ctx.go({ view: 'drops' })}
@@ -140,7 +142,7 @@ function Orders({ ctx, drop }: { ctx: ConsoleCtx; drop: Drop }) {
         {isLive && (
           <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
             <Tile label="Reserved" value={<>{out}<span className="text-base text-muted"> / {stock}</span></>} sub="held or sold" />
-            <Tile label="In queue" value={live ? (live.queue.earlyCount ?? 0) + live.queue.lateTickets : '…'} sub="approximate" />
+            <Tile label="Tickets issued" value={live ? (live.queue.earlyCount ?? 0) + live.queue.lateTickets : '…'} sub={live?.queue.earlyCount === null ? "Draw not counted yet; late tickets only" : "Upper bound, including admitted buyers"} />
             <Tile label="Holds open" value={live?.activeHolds ?? '…'} sub="checking out now" />
             <Tile label="Orders" value={live?.orders ?? '…'} sub={live ? `${live.unitsOrdered} units` : undefined} />
           </div>

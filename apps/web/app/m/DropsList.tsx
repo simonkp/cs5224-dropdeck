@@ -3,7 +3,7 @@
 import type { Drop } from '@dropdeck/shared';
 import { Copy, ExternalLink, MoreHorizontal, Pencil, Plus, Trash2, Upload, XCircle, CalendarCheck, CalendarX } from 'lucide-react';
 import { DropdownMenu } from 'radix-ui';
-import { useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
@@ -15,6 +15,8 @@ import { cn } from '../../lib/utils';
 import { Checklist } from './Checklist';
 import { ShareSheet, type ShareTarget } from './ShareSheet';
 import { absolute, dropUrl, entryOpened, StateBadge, ViewHeader, type ConsoleCtx } from './shared';
+
+interface Summary { dropId: string; stock: number; reserved: number; orders: number; paidOrders: number; awaitingOrders: number; partial: boolean }
 
 type Action = 'schedule' | 'unschedule' | 'cancel' | 'duplicate' | 'delete';
 type Filter = 'all' | 'Live' | 'Scheduled' | 'Draft' | 'ended';
@@ -38,6 +40,25 @@ export function DropsList({ ctx }: { ctx: ConsoleCtx }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<{ drop: Drop; action: 'cancel' | 'delete' } | null>(null);
   const [share, setShare] = useState<ShareTarget | null>(null);
+  const [summaries, setSummaries] = useState<Summary[]>([]);
+  const [summaryError, setSummaryError] = useState(false);
+  const [updated, setUpdated] = useState('');
+  const ids = sortDrops(ctx.drops ?? []).filter(d => d.state !== 'Draft' && d.state !== 'Scheduled').slice(0,20).map(d => d.dropId).join(',');
+  const loadSummary = useCallback(async () => {
+    if (!ids) { setSummaries([]); return; }
+    try {
+      const r = await api<{ summaries: Summary[]; generatedAt: string }>(`/m/overview?ids=${encodeURIComponent(ids)}`);
+      setSummaries(r.summaries); setUpdated(r.generatedAt); setSummaryError(false);
+    } catch { setSummaryError(true); }
+  }, [ids]);
+  useEffect(() => { void loadSummary(); }, [loadSummary, ctx.drops]);
+  const totals = summaries.reduce((n,s) => n+s.awaitingOrders,0);
+  const partial = summaries.some(s => s.partial);
+  const progress = (d: Drop) => {
+    const s = summaries.find(s => s.dropId === d.dropId);
+    if (!s) return <span className="text-sm text-muted">{d.variants.reduce((n,v) => n+v.stock,0)} units{d.state === 'Live' && ' · loading progress'}</span>;
+    return <div className="flex min-w-[140px] flex-col gap-1.5"><span className="text-sm font-bold">{s.reserved}{s.partial && d.state !== 'Live' ? '+' : ''} / {s.stock} {d.state === 'Live' ? 'reserved' : 'ordered'}</span><div className="h-2 overflow-hidden rounded-full bg-sunken"><div className="h-full rounded-full bg-ok" style={{ width: `${Math.min(100,s.stock ? s.reserved/s.stock*100 : 0)}%` }} /></div><span className="text-xs text-muted">{s.paidOrders}{s.partial ? '+' : ''} paid · {s.awaitingOrders}{s.partial ? '+' : ''} awaiting payment</span></div>;
+  };
   const shopUrl = ctx.profile?.slugClaimed ? absolute(`/s/${ctx.profile.slug}/`) : undefined;
 
   const act = async (d: Drop, action: Action) => {
@@ -69,6 +90,10 @@ export function DropsList({ ctx }: { ctx: ConsoleCtx }) {
       <ViewHeader title="Drops" actions={<div className="hidden lg:block">{newDrop}</div>} />
       {/* Bottom room on phones so the last card scrolls clear of the floating New drop button. */}
       <div className="flex flex-col gap-3 px-4 pb-20 lg:px-8 lg:pb-8">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {[[count('Live'), 'Live now'], [count('Scheduled'), 'Scheduled'], [updated ? `${totals}${partial ? '+' : ''}` : '—', 'Awaiting payment']].map(([value,label]) => <Card key={label} className="flex flex-col gap-2 p-4"><span className="text-xs font-bold tracking-wide text-muted uppercase">{label}</span><strong className="font-display text-3xl font-extrabold">{value}</strong></Card>)}
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted"><span>{summaryError ? 'Progress could not refresh. Last available values shown.' : updated ? `Snapshot ${new Date(updated).toLocaleTimeString()} · up to 20 recent/live drops${partial ? ' · partial counts (500 orders per drop)' : ''}` : 'Progress loads for live and ended drops.'}</span><Button variant="ghost" size="sm" onClick={() => void loadSummary()}>Refresh progress</Button></div>
         {all && <Checklist profile={ctx.profile} drops={all} go={ctx.go} onShare={openShare} />}
         <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] lg:mx-0 lg:px-0" role="tablist" aria-label="Filter drops">
           {FILTERS.map(([f, label]) => (
@@ -95,7 +120,7 @@ export function DropsList({ ctx }: { ctx: ConsoleCtx }) {
 
         {/* Phones and tablets: cards. */}
         <div className="grid gap-3 sm:grid-cols-2 lg:hidden">
-          {shown?.map((d) => <DropCard key={d.dropId} d={d} busy={busy === d.dropId} ctx={ctx} onAct={act} onConfirm={(action) => setConfirming({ drop: d, action })} onShare={() => openShare(d)} />)}
+          {shown?.map((d) => <DropCard key={d.dropId} d={d} busy={busy === d.dropId} ctx={ctx} onAct={act} onConfirm={(action) => setConfirming({ drop: d, action })} onShare={() => openShare(d)} progress={progress(d)} />)}
         </div>
 
         {/* Desktop: a table. */}
@@ -105,7 +130,7 @@ export function DropsList({ ctx }: { ctx: ConsoleCtx }) {
               <thead>
                 <tr className="text-left text-xs font-bold tracking-[0.05em] text-muted uppercase">
                   <th className="border-b border-line px-4 py-3">Drop</th><th className="border-b border-line px-4 py-3">Status</th>
-                  <th className="border-b border-line px-4 py-3">When</th><th className="border-b border-line px-4 py-3">Stock</th><th className="border-b border-line px-4 py-3" />
+                  <th className="border-b border-line px-4 py-3">When</th><th className="border-b border-line px-4 py-3">Progress</th><th className="border-b border-line px-4 py-3" />
                 </tr>
               </thead>
               <tbody>
@@ -114,7 +139,7 @@ export function DropsList({ ctx }: { ctx: ConsoleCtx }) {
                     <td className="px-4 py-3.5 font-bold">{d.title}</td>
                     <td className="px-4 py-3.5"><StateBadge state={d.state} /></td>
                     <td className="px-4 py-3.5 text-muted">{d.state === 'Draft' ? 'Not scheduled' : dayTime(d.openAt)}</td>
-                    <td className="px-4 py-3.5 text-muted">{d.variants.reduce((n, v) => n + v.stock, 0)} units</td>
+                    <td className="px-4 py-3.5 text-muted">{progress(d)}</td>
                     <td className="px-4 py-3.5"><div className="flex justify-end gap-2"><Actions d={d} busy={busy === d.dropId} ctx={ctx} onAct={act} onConfirm={(action) => setConfirming({ drop: d, action })} onShare={() => openShare(d)} /></div></td>
                   </tr>
                 ))}
@@ -130,7 +155,7 @@ export function DropsList({ ctx }: { ctx: ConsoleCtx }) {
         open={confirming !== null}
         onOpenChange={(o) => !o && setConfirming(null)}
         title={confirming?.action === 'cancel' ? `Cancel “${confirming.drop.title}”?` : `Delete “${confirming?.drop.title}”?`}
-        description={confirming?.action === 'cancel' ? 'Buyers will see that it was cancelled. Anyone holding an item loses it. This cannot be undone.' : 'The draft is removed for good.'}
+        description={confirming?.action === 'cancel' ? 'New reservations stop and active holds are voided. Confirmed orders remain; contact those buyers about collection or any refund. This cannot be undone.' : 'The draft is removed for good.'}
         confirmLabel={confirming?.action === 'cancel' ? 'Cancel drop' : 'Delete draft'}
         danger
         busy={busy !== null}
@@ -147,6 +172,7 @@ interface ItemProps {
   onAct: (d: Drop, a: Action) => Promise<void>;
   onConfirm: (a: 'cancel' | 'delete') => void;
   onShare: () => void;
+  progress?: ReactNode;
 }
 
 function DropCard(p: ItemProps) {
@@ -161,6 +187,7 @@ function DropCard(p: ItemProps) {
         </div>
         <StateBadge state={d.state} />
       </div>
+      {p.progress}
       <div className="flex gap-2"><Actions {...p} stretch /></div>
     </Card>
   );
@@ -172,7 +199,7 @@ function Actions({ d, busy, ctx, onAct, onConfirm, onShare, stretch }: ItemProps
   const grow = stretch ? 'flex-1' : '';
   let primary: ReactNode = null;
   if (d.state === 'Live') primary = <Button variant="ink" className={grow} onClick={() => ctx.go({ view: 'orders', id: d.dropId })}>Live view &amp; orders</Button>;
-  else if (d.state === 'Draft') primary = <Button variant="ink" className={grow} disabled={busy} onClick={() => void onAct(d, 'schedule')}>{busy ? 'Scheduling…' : 'Schedule'}</Button>;
+  else if (d.state === 'Draft') primary = <Button variant="ink" className={grow} disabled={busy} onClick={() => ctx.go({ view: 'edit', id: d.dropId })}>Finish & schedule</Button>;
   else if (d.state === 'Scheduled') primary = <Button variant="outline" className={grow} onClick={onShare}><Upload />Share</Button>;
   else primary = <Button variant="outline" className={grow} onClick={() => ctx.go({ view: 'orders', id: d.dropId })}>Orders &amp; report</Button>;
 
@@ -180,7 +207,7 @@ function Actions({ d, busy, ctx, onAct, onConfirm, onShare, stretch }: ItemProps
   return (
     <>
       {primary}
-      {editable && <Button variant="outline" className={grow} onClick={() => ctx.go({ view: 'edit', id: d.dropId })}>Edit</Button>}
+      {editable && d.state !== 'Draft' && <Button variant="outline" className={grow} onClick={() => ctx.go({ view: 'edit', id: d.dropId })}>Edit</Button>}
       {d.state === 'Live' && <Button variant="outline" size="icon" aria-label="Share link" onClick={onShare}><Upload /></Button>}
       <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>

@@ -7,7 +7,7 @@ import {
 } from '@dropdeck/shared';
 import { ddb, getDropCached, getHold, getProfile, isConditionFailure, releaseHold, strip, table } from '@dropdeck/shared/ddb';
 import { ssmSecret } from '@dropdeck/shared/secrets';
-import { checkCode, sendCode } from './otp.js';
+import { checkCode, codeStatus, sendCode } from './otp.js';
 
 /**
  * GET  /api/holds/{holdId}           resume a hold (or its confirmation) after a refresh
@@ -150,7 +150,7 @@ export async function handler(event: APIGatewayProxyEventV2) {
     switch (event.routeKey) {
       case 'GET /api/holds/{holdId}': {
         if (hold.state === 'confirmed') return json(200, await confirmation(drop, await ensureOrder(drop, hold)));
-        const active = hold.state === 'active' && hold.expiresAt > now;
+        const active = hold.state === 'active' && hold.expiresAt > now && drop.state !== 'Cancelled';
         return json(200, {
           state: active ? 'active' : 'expired',
           expiresAt: new Date(hold.expiresAt).toISOString(),
@@ -158,6 +158,7 @@ export async function handler(event: APIGatewayProxyEventV2) {
           qty: hold.qty,
           verification: drop.verification,
           codeSent: Boolean(hold.otpHash),
+          code: active ? codeStatus(hold, now) : null,
         });
       }
       case 'POST /api/holds/{holdId}/otp': {

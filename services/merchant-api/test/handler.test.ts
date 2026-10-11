@@ -3,7 +3,7 @@ import { ApiError, type Drop } from '@dropdeck/shared';
 
 vi.mock('../src/repo.js', () => ({
   getDrop: vi.fn(), getProfile: vi.fn(), transition: vi.fn(), writeStockShards: vi.fn(), saveDrop: vi.fn(),
-  listDrops: vi.fn(), saveProfile: vi.fn(), slugOwner: vi.fn(), bumpUploadQuota: vi.fn(), listUsage: vi.fn(),
+  overviewOrders: vi.fn(), listDrops: vi.fn(), saveProfile: vi.fn(), slugOwner: vi.fn(), bumpUploadQuota: vi.fn(), listUsage: vi.fn(),
 }));
 vi.mock('../src/publish.js', () => ({
   writeDropJson: vi.fn(), deleteDropJson: vi.fn(), writeStateJson: vi.fn(), deleteStateJson: vi.fn(),
@@ -232,5 +232,24 @@ describe('POST /m/uploads', () => {
     expect(r.statusCode).toBe(400);
     expect(repo.bumpUploadQuota).not.toHaveBeenCalled();
     expect(pub.putImage).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('GET /m/overview', () => {
+  const overview = () => handler({ routeKey: 'GET /m/overview', queryStringParameters: { ids: 'drop1,drop1' }, requestContext: { authorizer: { jwt: { claims: { sub: 'tenant-1' } } } } } as never);
+  it('uses the authenticated tenant, returns only aggregate data, and marks truncated order counts', async () => {
+    repo.getDrop.mockResolvedValue({ ...draft(), state: 'Closed' });
+    repo.overviewOrders.mockResolvedValue({ rows: [{ status: 'confirmed', qty: 2 }], partial: true });
+    const result = await overview();
+    expect(result.statusCode).toBe(200);
+    expect(repo.getDrop).toHaveBeenCalledExactlyOnceWith('tenant-1', 'drop1');
+    expect(JSON.parse(result.body).summaries).toEqual([expect.objectContaining({ dropId: 'drop1', awaitingOrders: 1, partial: true, reserved: 2 })]);
+    expect(result.body).not.toContain('email');
+  });
+  it('does not read another tenant’s order data when the drop is unavailable', async () => {
+    repo.getDrop.mockRejectedValue(new ApiError('NOT_FOUND', 'Drop not found'));
+    expect((await overview()).statusCode).toBe(404);
+    expect(repo.overviewOrders).not.toHaveBeenCalled();
   });
 });

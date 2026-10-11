@@ -43,6 +43,27 @@ describe.skipIf(!enabled)('phase 4 against DynamoDB Local', () => {
   beforeAll(createTable);
   beforeEach(() => clearDropCache());
 
+  it('returns a tenant-scoped, bounded overview without buyer details', async () => {
+    const drop = await liveDrop({ verification: 'off' });
+    const h = await hold(drop, 2);
+    expect((await confirm(h, { name: 'A Buyer', email: 'overview@example.com' })).status).toBe(200);
+    const overview = parse(await merchant({
+      routeKey: 'GET /m/overview',
+      queryStringParameters: { ids: `${drop.dropId},${drop.dropId}` },
+      requestContext: { authorizer: { jwt: { claims: { sub: drop.tenantId }, scopes: [] } } },
+    } as never));
+    expect(overview.status).toBe(200);
+    expect(overview.summaries).toEqual([expect.objectContaining({
+      dropId: drop.dropId, reserved: 2, orders: 1, awaitingOrders: 1, partial: false,
+    })]);
+    expect(JSON.stringify(overview)).not.toContain('overview@example.com');
+    const otherTenant = parse(await merchant({
+      routeKey: 'GET /m/overview', queryStringParameters: { ids: drop.dropId },
+      requestContext: { authorizer: { jwt: { claims: { sub: 'another-tenant' }, scopes: [] } } },
+    } as never));
+    expect(otherTenant.status).toBe(404);
+  });
+
   describe('email code at checkout (log mode)', () => {
     it('confirms with the code sent to the address', async () => {
       const drop = await liveDrop({ verification: 'email' });
@@ -51,6 +72,13 @@ describe.skipIf(!enabled)('phase 4 against DynamoDB Local', () => {
       const sent = await otp(h, 'Ann@Example.com');
       expect(sent.sentTo).toBe('A•••n@Example.com');
       expect(sent.devCode).toMatch(/^\d{6}$/);
+      const resumed = parse(await checkout({ routeKey: 'GET /api/holds/{holdId}', pathParameters: { holdId: h.holdId }, headers: { authorization: `Bearer ${h.hold}` } } as never));
+      expect(resumed.codeSent).toBe(true);
+      expect(resumed.code).toMatchObject({ sentTo: 'a•••n@example.com', sendsLeft: 2, attemptsLeft: 5 });
+      expect(resumed.code.resendAfterSec).toBeGreaterThan(20);
+      expect(resumed.otpHash).toBeUndefined();
+      expect(resumed.otpEmail).toBeUndefined();
+
       const ok = await confirm(h, { name: 'Ann', email: 'ann@example.com', code: sent.devCode });
       expect(ok.status).toBe(200);
       expect(ok.orderRef).toBeTruthy();

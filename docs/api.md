@@ -98,7 +98,7 @@ The claim window opens at the ticket's admission time or its issue time, whichev
 
 ### `GET /api/holds/{holdId}`
 
-Resume after a refresh. Active: `{ state: "active" | "expired", expiresAt, variantId, qty, verification, codeSent }`.
+Resume after a refresh. Active: `{ state: "active" | "expired", expiresAt, variantId, qty, verification, codeSent, code }`. `code` is null until sent (or after expiry/cancellation); otherwise it contains `{ sentTo, resendAfterSec, sendsLeft, attemptsLeft, expiresAt }`. The recipient is masked; neither the full address nor OTP/hash is returned.
 Confirmed: the confirmation body below.
 
 ### `POST /api/holds/{holdId}/otp` (drops with `verification: "email"`)
@@ -127,6 +127,7 @@ key is scoped to it, so another merchant's drop is `NOT_FOUND`.
 | `GET /m/slugs/{slug}` | | `{ slug, available, problem }`; `available` is true when the link is free or already yours |
 | `POST /m/uploads` | `{ image: base64 or data URL }` | `201 { path: "/b/{tenantId}/{hash}.{ext}", contentType, bytes }` |
 | `GET /m/usage` | | `{ tier, plan, months[{ month, drops, cancelled, sessions, orders, units, revenueCents }] }`, newest 12 months |
+| `GET /m/overview?ids=id1,id2` | up to 20 unique IDs | `{ generatedAt, summaries[{dropId, stock, reserved, orders, paidOrders, awaitingOrders, ordered, partial}] }`; authenticated tenant only; at most 500 projected orders per drop, partial counts explicitly marked |
 | `GET /m/drops` | | `Drop[]`, newest first |
 | `POST /m/drops` | drop fields (below) | `201 Drop` (Draft) |
 | `GET /m/drops/{dropId}` | | `Drop` |

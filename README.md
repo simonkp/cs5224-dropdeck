@@ -22,6 +22,29 @@ oversell. CS5224 Cloud Computing, AY2026/27 Sem 1, Team 8.
 
 ## First-time setup
 
+### Run the frontend locally
+
+Use Node.js 22 or newer (Node 22 is used in CI). From the repository root:
+
+```bash
+corepack pnpm install --frozen-lockfile
+corepack pnpm dev
+```
+
+Open <http://localhost:3000>. `corepack pnpm` uses the version pinned in `packageManager`
+without replacing an existing global pnpm installation. Stop the server with Ctrl+C.
+
+The web scripts use webpack because Turbopack's CSS worker failed to bind its local socket
+in the macOS setup environment. Both development and static export are verified with webpack.
+
+The homepage, privacy page and merchant sign-in screen can render without AWS configuration.
+Sign-up, sign-in, merchant data and buyer transactions require a deployed AWS development stage;
+the repository does not include an offline backend. Copy that stage's `config.json` into
+`apps/web/public/config.json` as described below. Docker is only needed for the DynamoDB integration
+tests, not for the frontend or production build.
+
+### Validate and deploy
+
 ```bash
 corepack enable            # pnpm 10 via packageManager
 pnpm install
@@ -98,3 +121,12 @@ Our own domain and email (certificate, DNS, SES production access) are per-stage
 - [x] Create GitHub repo, push, deploy OIDC stack, first green `staging` deploy
 - [x] Console sign-in (Cognito managed login, code + PKCE) and drop editor
 - [ ] Buy domain, verify in SES, request production access (stack ready; steps in `docs/domain-setup.md`)
+
+### Populated local design preview
+
+Run `pnpm dev:demo`, then open [the scenario gallery](http://localhost:3000/__preview/).
+This development-only mode supplies local buyer and merchant data without AWS credentials.
+The checkout test code is `123456`; no email or payment is sent. Reset fixtures from the gallery.
+For scope, validation and connected-environment requirements, see [Local UI review](docs/local-ui-review.md).
+
+Production export is unchanged: `pnpm web:build`, then `pnpm web:verify-production` verifies that demo fixtures and the preview route are excluded.

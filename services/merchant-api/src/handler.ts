@@ -4,6 +4,7 @@ import {
   ALWAYS_EDITABLE, ApiError, canTransition, errorResult, isLockedForEdit, json, parseBody, planProblem, PLANS, slugProblem,
   type Drop, type MerchantProfile,
 } from '@dropdeck/shared';
+import { overviewIds, orderCounts, stockTotal } from './overview.js';
 import * as repo from './repo.js';
 import * as pub from './publish.js';
 import { buildReport, ordersCsv } from './reports.js';
@@ -201,6 +202,21 @@ export async function handler(event: Event) {
         return json(201, copy);
       }
 
+      case 'GET /m/overview': {
+        const ids = overviewIds(event.queryStringParameters?.ids);
+        const summaries = [];
+        // Four drops concurrently, max 20 drops and one page of 500 projected orders per drop.
+        for (let i = 0; i < ids.length; i += 4) {
+          summaries.push(...await Promise.all(ids.slice(i, i + 4).map(async id => {
+            const drop = await repo.getDrop(t, id);
+            const [page, sold] = await Promise.all([repo.overviewOrders(t, id), drop.state === 'Live' ? unitsSold(drop) : Promise.resolve(null)]);
+            const counts = orderCounts(page.rows);
+            return { dropId: id, stock: stockTotal(drop), ...counts, reserved: sold ? Object.values(sold).reduce((n,v) => n+v,0) : counts.ordered, partial: page.partial };
+          })));
+        }
+        return json(200, { generatedAt: new Date().toISOString(), summaries });
+      }
+
       case 'GET /m/drops/{dropId}/live': {
         // While Live, units out (held or confirmed) come from the stock counters; orders are the confirmed part.
         const drop = await repo.getDrop(t, d!);
@@ -258,6 +274,6 @@ export const ROUTES = [
   'GET /m/drops/{dropId}', 'PATCH /m/drops/{dropId}', 'DELETE /m/drops/{dropId}',
   'POST /m/drops/{dropId}/schedule', 'POST /m/drops/{dropId}/unschedule',
   'POST /m/drops/{dropId}/cancel', 'POST /m/drops/{dropId}/duplicate',
-  'GET /m/drops/{dropId}/live', 'GET /m/drops/{dropId}/orders', 'PATCH /m/orders/{ref}',
+  'GET /m/overview', 'GET /m/drops/{dropId}/live', 'GET /m/drops/{dropId}/orders', 'PATCH /m/orders/{ref}',
   'GET /m/drops/{dropId}/export.csv', 'GET /m/drops/{dropId}/report',
 ] as const;
