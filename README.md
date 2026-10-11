@@ -127,6 +127,6 @@ Our own domain and email (certificate, DNS, SES production access) are per-stage
 Run `pnpm dev:demo`, then open [the scenario gallery](http://localhost:3000/__preview/).
 This development-only mode supplies local buyer and merchant data without AWS credentials.
 The checkout test code is `123456`; no email or payment is sent. Reset fixtures from the gallery.
-For scope, validation and connected-environment requirements, see [Local UI review](docs/local-ui-review.md).
+The local preview simulates services. Connected Cognito, SES, CloudFront and scheduled-controller checks require a development AWS deployment.
 
 Production export is unchanged: `pnpm web:build`, then `pnpm web:verify-production` verifies that demo fixtures and the preview route are excluded.
