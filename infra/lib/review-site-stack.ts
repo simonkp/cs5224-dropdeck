@@ -12,7 +12,7 @@ import { BucketDeployment, Source } from 'aws-cdk-lib/aws-s3-deployment';
 import type { Construct } from 'constructs';
 import { REWRITE_FN } from './dropdeck-stack.js';
 
-export interface ReviewSiteStackProps extends StackProps { assetPath?: string }
+export interface ReviewSiteStackProps extends StackProps { assetPath?: string; redirectUrl?: string }
 
 /** Separate, disposable CloudFront site for the simulated design gallery. No buyer API or merchant data. */
 export class ReviewSiteStack extends Stack {
@@ -29,7 +29,18 @@ export class ReviewSiteStack extends Stack {
       removalPolicy: RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
     });
-    const rewrite = new CfFunction(this, 'RewriteFn', { code: FunctionCode.fromInline(REWRITE_FN) });
+    // Once a connected dev stage replaces the simulated gallery, keep existing review links useful.
+    // A viewer-request redirect also makes every former preview path inaccessible without deleting the stack.
+    const redirect = props.redirectUrl?.replace(/\/$/, '');
+    if (redirect && !/^https:\/\/[a-z0-9.-]+$/i.test(redirect)) throw new Error('redirectUrl must be an HTTPS origin');
+    const redirectFn = redirect ? `function handler(event) {
+  var uri = event.request.uri;
+  if (uri === '/__preview/' || uri.indexOf('/d/preview/') === 0) uri = '/';
+  return { statusCode: 302, statusDescription: 'Found', headers: {
+    location: { value: ${JSON.stringify(redirect)} + uri }
+  }};
+}` : REWRITE_FN;
+    const rewrite = new CfFunction(this, 'RewriteFn', { code: FunctionCode.fromInline(redirectFn) });
     const distribution = new Distribution(this, 'ReviewCdn', {
       defaultRootObject: 'index.html',
       defaultBehavior: {

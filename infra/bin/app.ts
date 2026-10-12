@@ -24,7 +24,7 @@ const setting = (name: string): string | undefined => {
 };
 
 const review = String(app.node.tryGetContext('review') ?? '') === 'true';
-const stack = review ? new ReviewSiteStack(app, 'DropDeck-UiReview', { env }) : new DropDeckStack(app, `DropDeck-${stage}`, {
+const stack = review ? new ReviewSiteStack(app, 'DropDeck-UiReview', { env, redirectUrl: setting('reviewRedirectUrl') }) : new DropDeckStack(app, `DropDeck-${stage}`, {
   env,
   stage,
   budgetUsd: Number(app.node.tryGetContext('budgetUsd') ?? 10),

@@ -22,6 +22,8 @@ npx cdk deploy DropDeck-UiReview -c review=true --require-approval never --outpu
 
 Share the `ReviewUrl` output for the familiar landing page, and append `/__preview/` for the scenario gallery. Buyer URLs like `/d/preview/held/` and the merchant console at `/m/` use the same static export. The banner labels all screens as simulated. The review stack owns its own private S3 bucket and CloudFront distribution, leaving `DropDeck-staging` untouched.
 
+When replacing the simulated gallery with a connected dev stage, deploy that stage first, then retire the review URL with `-c reviewRedirectUrl=https://<dev-stage-cloudfront-host>`. The review distribution returns a redirect for all paths; former preview URLs lead to the connected site's landing page. This preserves shared links without leaving simulated buyer and merchant screens publicly reachable. Remove `reviewRedirectUrl` only if the simulated gallery is intentionally restored.
+
 When review is finished, remove the temporary site:
 
 ```bash
