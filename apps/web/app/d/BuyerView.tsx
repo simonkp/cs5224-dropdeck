@@ -426,7 +426,8 @@ function Held(props: {
   onStartOver: () => void;
 }) {
   const { session, drop, serverNow } = props;
-  const needsCode = drop.verification === 'email';
+  // The hold API is authoritative; published drop.json can be cached while a setting changes.
+  const [needsCode, setNeedsCode] = useState(true);
   // Pre-filled from what the buyer typed while waiting; edits here are remembered the same way.
   const [prefilled] = useState(() => Boolean(loadDetails().name || loadDetails().email));
   const [name, setNameState] = useState(() => loadDetails().name);
@@ -448,11 +449,12 @@ function Held(props: {
   useEffect(() => {
     let active = true;
     setResume('loading');
-    buyerApi<Confirmation & { state: string; code?: { sentTo: string; resendAfterSec: number; sendsLeft: number; attemptsLeft: number } }>(holdPath, { method: 'GET', token: session.hold })
+    buyerApi<Confirmation & { state: string; verification?: 'email' | 'off'; code?: { sentTo: string; resendAfterSec: number; sendsLeft: number; attemptsLeft: number } }>(holdPath, { method: 'GET', token: session.hold })
       .then(r => {
         if (!active) return;
         if (r.state === 'confirmed') { props.setSession({ stage: 'confirmed', confirmation: r }); return; }
         if (r.state !== 'active') { setResume('expired'); return; }
+        setNeedsCode(r.verification !== 'off');
         if (r.code) { setSent({ to: r.code.sentTo, at: Date.now(), resendAfterSec: r.code.resendAfterSec, sendsLeft: r.code.sendsLeft }); setAttemptsLeft(r.code.attemptsLeft); }
         setResume('ready');
       }).catch(() => { if (active) setResume(Date.parse(session.expiresAt) <= Date.now() ? 'expired' : 'error'); });
@@ -552,9 +554,10 @@ function Held(props: {
           </p>
         </Card>
 
-        {needsCode && sent && (
+        {needsCode && (
           <Card className="flex flex-col gap-3">
             <Eyebrow>Email code</Eyebrow>
+            {!sent ? <p className="text-sm leading-snug text-muted">Verify your email before confirming this order. Enter your details and select Send code to receive a 6-digit code.</p> : <>
             <p className="text-sm leading-snug text-muted">We sent a 6-digit code to <strong className="text-ink">{sent.to}</strong>.</p>
             {sent.devCode && (
               <p className="rounded-xl bg-brand-tint px-3 py-2 text-sm text-ink">Test mode, no email sent: your code is <strong className="tabular">{sent.devCode}</strong></p>
@@ -567,6 +570,7 @@ function Held(props: {
                 {sent.sendsLeft === 0 ? 'No resends left' : resendIn > 0 ? `Resend in ${resendIn}s` : 'Resend code'}
               </Button>
             </div>
+            </>}
           </Card>
         )}
       </form>

@@ -190,7 +190,7 @@ function baseDrop(tenantId: string, over: Partial<Drop> & Pick<Drop, 'title' | '
   const now = new Date().toISOString();
   return {
     tenantId, dropId: id(), description: '', entryWindowMin: 15, graceSec: 30, perBuyerLimit: 2, holdSec: 300,
-    admitWindowSec: 120, ratePreset: 'normal', verification: 'off', shardCount: 4, createdAt: now, updatedAt: now, version: 2,
+    admitWindowSec: 120, ratePreset: 'normal', verification: 'email', shardCount: 4, createdAt: now, updatedAt: now, version: 2,
     ...over,
   };
 }
@@ -266,7 +266,7 @@ async function load(st: Stack, tenant: string) {
     imageUrl: await img('tb-sourdough.jpg'),
     variants: [{ name: 'Country loaf', stock: 40, priceCents: 900 }, { name: 'Seeded rye', stock: 20, priceCents: 1100 }],
     openAt: openAt.toISOString(), endAt: new Date(openAt.getTime() + 30 * MIN).toISOString(),
-    entryWindowMin: 5, verification: 'off', holdSec: 300,
+    entryWindowMin: 5, verification: 'email', holdSec: 300,
   });
   const scheduled = await merchantInvoke<Drop>(st, tenant, 'POST /m/drops/{dropId}/schedule', undefined, created.dropId);
 
