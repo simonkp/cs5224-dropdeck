@@ -2,6 +2,7 @@
 import { App, Tags } from 'aws-cdk-lib';
 import { DropDeckStack } from '../lib/dropdeck-stack.js';
 import { GithubOidcStack } from '../lib/github-oidc-stack.js';
+import { ReviewSiteStack } from '../lib/review-site-stack.js';
 
 const app = new App();
 const stage = String(app.node.tryGetContext('stage') ?? 'dev');
@@ -22,7 +23,8 @@ const setting = (name: string): string | undefined => {
   return v === undefined || v === '' ? undefined : String(v);
 };
 
-const stack = new DropDeckStack(app, `DropDeck-${stage}`, {
+const review = String(app.node.tryGetContext('review') ?? '') === 'true';
+const stack = review ? new ReviewSiteStack(app, 'DropDeck-UiReview', { env, redirectUrl: setting('reviewRedirectUrl') }) : new DropDeckStack(app, `DropDeck-${stage}`, {
   env,
   stage,
   budgetUsd: Number(app.node.tryGetContext('budgetUsd') ?? 10),
@@ -42,4 +44,4 @@ Tags.of(stack).add('Stage', stage);
 // One-off per shared account: lets GitHub Actions deploy through the CDK bootstrap roles.
 const githubRepo = String(app.node.tryGetContext('githubRepo') ?? '');
 const githubSubPrefix = String(app.node.tryGetContext('githubSubPrefix') ?? '') || undefined;
-if (githubRepo) new GithubOidcStack(app, 'DropDeck-GithubOidc', { env, githubRepo, githubSubPrefix });
+if (githubRepo && !review) new GithubOidcStack(app, 'DropDeck-GithubOidc', { env, githubRepo, githubSubPrefix });

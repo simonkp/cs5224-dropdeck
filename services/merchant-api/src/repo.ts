@@ -241,3 +241,14 @@ export async function queueCounts(drop: Drop): Promise<{ earlyCount: number | nu
   const r = await ddb.send(new GetCommand({ TableName: env.table(), Key: keys.ticketCounter(drop.tenantId, drop.dropId) }));
   return { earlyCount: drop.earlyCount ?? null, lateTickets: Number(r.Item?.v ?? 0) };
 }
+
+/** One bounded, projected page for the overview: no buyer identity leaves this function. */
+export async function overviewOrders(t: string, d: string) {
+  const k = keys.orderPrefix(t, d);
+  const r = await ddb.send(new QueryCommand({
+    TableName: env.table(), KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
+    ExpressionAttributeValues: { ':pk': k.PK, ':sk': k.SKPrefix },
+    ProjectionExpression: '#s, qty', ExpressionAttributeNames: { '#s': 'status' }, Limit: 500,
+  }));
+  return { rows: (r.Items ?? []).map(o => ({ status: String(o.status), qty: Number(o.qty) })), partial: Boolean(r.LastEvaluatedKey) };
+}

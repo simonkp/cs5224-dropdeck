@@ -14,7 +14,22 @@ export const OTP = { ttlMs: 10 * 60_000, resendAfterMs: 30_000, maxSends: 3, max
 /** Keyed by hold, so a code is useless on any other hold even if it leaks. */
 const codeHash = (key: string, holdId: string, code: string) => createHmac('sha256', key).update(`${holdId}:${code}`).digest('base64url');
 
-const mask = (email: string) => email.replace(/^(.)[^@]*(.@)/, (_, a: string, b: string) => `${a}•••${b}`);
+const mask = (email: string) => {
+  const [local = '', domain = ''] = email.split('@');
+  return `${local[0] ?? ''}•••${local.length > 1 ? local.at(-1) : ''}@${domain}`;
+};
+
+/** Safe resume metadata: never expose the OTP, its hash, or the full email address. */
+export function codeStatus(hold: Hold, now: number) {
+  if (!hold.otpHash || !hold.otpEmail) return null;
+  return {
+    sentTo: mask(hold.otpEmail),
+    resendAfterSec: Math.max(0, Math.ceil(((hold.otpLastSentAt ?? 0) + OTP.resendAfterMs - now) / 1000)),
+    sendsLeft: Math.max(0, OTP.maxSends - (hold.otpSends ?? 0)),
+    attemptsLeft: Math.max(0, OTP.maxAttempts - (hold.otpAttempts ?? 0)),
+    expiresAt: new Date(Math.min(hold.otpExpiresAt ?? 0, hold.expiresAt)).toISOString(),
+  };
+}
 
 export async function sendCode(drop: Drop, hold: Hold, rawEmail: unknown, key: string, now: number) {
   if (drop.verification !== 'email') throw new ApiError('VALIDATION', 'This drop does not need an email code');

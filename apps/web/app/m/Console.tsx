@@ -3,7 +3,7 @@
 // Types only from @dropdeck/shared at runtime-sensitive spots: its index pulls in node:crypto via tokens.ts.
 import type { Drop, MerchantProfile } from '@dropdeck/shared';
 import { ArrowRight, LayoutGrid, LogOut, Shuffle, ShieldCheck, Store, CreditCard, User } from 'lucide-react';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
@@ -44,14 +44,22 @@ function routeSearch(r: Route): string {
 /** Console views live in the query string (?view=orders&drop=…): one static page, and the back button works. */
 function useRoute(): [Route, (r: Route) => void] {
   const [route, setRoute] = useState<Route>({ view: 'drops' });
+  const currentUrl = useRef('');
   useEffect(() => {
     setRoute(parseRoute(window.location.search));
-    const onPop = () => setRoute(parseRoute(window.location.search));
+    currentUrl.current = window.location.href;
+    const onPop = () => {
+      if (!window.dispatchEvent(new Event('dd:navigate', { cancelable: true }))) { window.history.pushState(null, '', currentUrl.current); return; }
+      currentUrl.current = window.location.href;
+      setRoute(parseRoute(window.location.search));
+    };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
   const go = useCallback((r: Route) => {
+    if (!window.dispatchEvent(new Event('dd:navigate', { cancelable: true }))) return;
     window.history.pushState(null, '', `/m/${routeSearch(r)}`);
+    currentUrl.current = window.location.href;
     setRoute(r);
     window.scrollTo({ top: 0 });
   }, []);
@@ -167,6 +175,7 @@ function SignedIn() {
           {NAV.map((n) => (
             <a
               key={n.view}
+              data-console-nav
               href={`/m/${routeSearch({ view: n.view })}`}
               onClick={(e) => { e.preventDefault(); go({ view: n.view }); }}
               aria-current={current === n.view ? 'page' : undefined}
@@ -197,6 +206,7 @@ function SignedIn() {
           {NAV.map((n) => (
             <a
               key={n.view}
+              data-console-nav
               href={`/m/${routeSearch({ view: n.view })}`}
               onClick={(e) => { e.preventDefault(); go({ view: n.view }); }}
               aria-current={current === n.view ? 'page' : undefined}

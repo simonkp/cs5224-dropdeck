@@ -6,14 +6,18 @@
     "node": ">=22"
   },
   "scripts": {
+    "dev": "pnpm --filter web dev --hostname localhost",
     "build": "pnpm -r --filter ./packages/** build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "synth": "pnpm --filter infra synth",
     "web:build": "pnpm --filter web build",
+    "web:review-build": "node scripts/build-web-review.mjs",
     "test:int": "scripts/test-int.sh",
     "seed": "pnpm --filter @dropdeck/eval seed",
     "demo:reset": "scripts/demo-reset.sh",
-    "ops": "pnpm --silent --filter @dropdeck/eval ops"
+    "ops": "pnpm --silent --filter @dropdeck/eval ops",
+    "dev:demo": "DROPDECK_DEMO=1 pnpm dev",
+    "web:verify-production": "node scripts/check-web-production.mjs"
   }
 }

@@ -288,6 +288,7 @@ export class DropDeckStack extends Stack {
       });
       return new NodejsFunction(this, name, {
         entry: path.join(repoRoot, entry),
+        projectRoot: repoRoot,
         runtime: Runtime.NODEJS_22_X,
         architecture: Architecture.ARM_64,
         memorySize: extra.memory ?? 512,
@@ -380,6 +381,7 @@ export class DropDeckStack extends Stack {
     const authorizer = new HttpUserPoolAuthorizer('MerchantAuth', userPool, { userPoolClients: [userPoolClient] });
     const merchantIntegration = new HttpLambdaIntegration('MerchantInt', merchantFn);
     const merchantRoutes: Array<[HttpMethod, string]> = [
+      [HttpMethod.GET, '/m/overview'],
       [HttpMethod.GET, '/m/profile'], [HttpMethod.PUT, '/m/profile'],
       [HttpMethod.GET, '/m/slugs/{slug}'], [HttpMethod.POST, '/m/uploads'], [HttpMethod.GET, '/m/usage'],
       [HttpMethod.GET, '/m/drops'], [HttpMethod.POST, '/m/drops'],

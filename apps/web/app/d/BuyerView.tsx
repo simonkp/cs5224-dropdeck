@@ -52,7 +52,7 @@ function useTurnNudge(active: boolean) {
 /** After the drop closes (or is cancelled), a buyer who ordered still sees their confirmation. */
 export function Ended({ ids, drop, cancelled }: { ids: Ids; drop: PublicDrop; cancelled: boolean }) {
   const s = loadSession(ids.t, ids.d);
-  if (s?.stage === 'confirmed') return <Confirmed c={s.confirmation} drop={drop} />;
+  if (s?.stage === 'confirmed') return <Confirmed c={s.confirmation} drop={drop} cancelled={cancelled} />;
   const shop = drop.merchant.slug && (
     <Button size="lg" variant={cancelled ? 'outline' : 'brand'} className="w-full" asChild>
       <a href={`/s/${drop.merchant.slug}/`}>{cancelled ? 'Back to the shop' : 'See upcoming drops'}</a>
@@ -63,7 +63,7 @@ export function Ended({ ids, drop, cancelled }: { ids: Ids; drop: PublicDrop; ca
       <main className="flex flex-col gap-4 p-4">
         {cancelled ? (
           <StateCard icon={<XCircle />} iconClass="bg-danger-tint text-danger" title="This drop was cancelled" action={shop}>
-            {drop.merchant.name} cancelled “{drop.title}”. No orders were taken and nobody needs to pay.
+            {drop.merchant.name} cancelled “{drop.title}”. New reservations are closed. If you already confirmed an order, contact the shop about collection or any payment.
           </StateCard>
         ) : (
           <StateCard icon={<Package />} iconClass="bg-brand-tint text-brand-text" title="This drop has ended" action={shop}>
@@ -117,7 +117,7 @@ export function Buyer({ ids, drop, state, serverNow }: { ids: Ids; drop: PublicD
   const reservedNote = allReserved && (
     <Card className="flex gap-3 border-warn/20 bg-warn-tint text-warn">
       <Clock className="mt-0.5 size-5 shrink-0" />
-      <p className="text-sm leading-snug font-semibold">Everything is reserved right now. Unpaid holds expire after {Math.round(drop.holdSec / 60)} min and go back to stock, so it is worth keeping your place.</p>
+      <p className="text-sm leading-snug font-semibold">Everything is reserved right now. Unconfirmed reservations expire after {Math.round(drop.holdSec / 60)} min and go back to stock, so it is worth keeping your place.</p>
     </Card>
   );
 
@@ -132,7 +132,7 @@ export function Buyer({ ids, drop, state, serverNow }: { ids: Ids; drop: PublicD
   const live = state?.state === 'Live';
   const drawAt = Date.parse(drop.openAt);
   const opensAt = Date.parse(drop.entryOpensAt);
-  const beforeDraw = serverNow < drawAt + 30_000;
+  const beforeDraw = serverNow < drawAt || state?.earlyCount === null;
   const progress = Math.min(1, Math.max(0, (serverNow - opensAt) / Math.max(1, drawAt - opensAt)));
   const bar = busy ? (
     <>
@@ -174,7 +174,7 @@ export function Buyer({ ids, drop, state, serverNow }: { ids: Ids; drop: PublicD
           ) : (
             <>
               <Eyebrow>The draw has happened</Eyebrow>
-              <p className="text-sm leading-relaxed text-muted">Join now for a place after everyone in the draw. Unclaimed and unpaid items come back to stock, so there is still a chance.</p>
+              <p className="text-sm leading-relaxed text-muted">Join now for a place after everyone in the draw. Unconfirmed reservations can return to stock, so there is still a chance.</p>
             </>
           )}
         </Card>
@@ -325,7 +325,7 @@ function Queued(props: {
           <ErrorText>{notice && notice !== 'Almost your turn…' ? notice : null}</ErrorText>
           <div className="flex justify-between text-[15px]"><span className="text-muted">Total</span><span className="tabular font-extrabold">{price(picked.priceCents * qty)}</span></div>
           <Button size="lg" className="w-full" disabled={busy || state?.soldOut?.[variantId]} onClick={() => void claim()}>
-            {busy ? <><Spinner />Reserving…</> : notice === 'Almost your turn…' ? 'Almost your turn…' : `Reserve ${qty} × ${picked.name}`}
+            {busy ? <><Spinner />Reserving…</> : notice === 'Almost your turn…' ? 'Almost your turn…' : left <= 0 ? 'Check reservation availability' : `Reserve ${qty} × ${picked.name}`}
           </Button>
         </>
       )}
@@ -338,7 +338,7 @@ function Queued(props: {
               <circle cx="42" cy="42" r="36" fill="none" strokeWidth="8" strokeLinecap="round" className="stroke-brand transition-[stroke-dashoffset] duration-300"
                 strokeDasharray={ring} strokeDashoffset={ring * (1 - Math.max(0, Math.min(1, left / (drop.admitWindowSec * 1000))))} />
             </svg>
-            <span className="tabular absolute inset-0 flex items-center justify-center text-lg font-extrabold" role="timer" aria-label={`${mmss(left)} left to reserve`}>{mmss(left)}</span>
+            <span className="tabular absolute inset-0 flex items-center justify-center text-lg font-extrabold" role="timer" aria-label={`About ${mmss(left)} left to reserve`}>{mmss(left)}</span>
           </div>
           <div className="flex flex-col gap-1">
             <h1 className="font-display text-[30px] leading-[1.02] font-extrabold tracking-[-0.025em]">It&apos;s your turn</h1>
@@ -434,7 +434,7 @@ function Held(props: {
   const setName = (v: string) => { setNameState(v); saveDetails({ name: v, email }); };
   const setEmail = (v: string) => { setEmailState(v); saveDetails({ name, email: v }); };
   const [code, setCode] = useState('');
-  const [sent, setSent] = useState<{ to: string; at: number; resendAfterSec: number; devCode?: string } | null>(null);
+  const [sent, setSent] = useState<{ to: string; at: number; resendAfterSec: number; sendsLeft: number; devCode?: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const left = Date.parse(session.expiresAt) - serverNow;
@@ -442,6 +442,23 @@ function Held(props: {
   const total = variant ? price(variant.priceCents * session.qty) : '';
   const holdPath = `/api/holds/${encodeURIComponent(session.holdId)}`;
   const resendIn = sent ? Math.ceil((sent.at + sent.resendAfterSec * 1000 - Date.now()) / 1000) : 0;
+  const [resume, setResume] = useState<'loading' | 'ready' | 'error' | 'expired'>('loading');
+  const [resumeVersion, setResumeVersion] = useState(0);
+  const [attemptsLeft, setAttemptsLeft] = useState(5);
+  useEffect(() => {
+    let active = true;
+    setResume('loading');
+    buyerApi<Confirmation & { state: string; code?: { sentTo: string; resendAfterSec: number; sendsLeft: number; attemptsLeft: number } }>(holdPath, { method: 'GET', token: session.hold })
+      .then(r => {
+        if (!active) return;
+        if (r.state === 'confirmed') { props.setSession({ stage: 'confirmed', confirmation: r }); return; }
+        if (r.state !== 'active') { setResume('expired'); return; }
+        if (r.code) { setSent({ to: r.code.sentTo, at: Date.now(), resendAfterSec: r.code.resendAfterSec, sendsLeft: r.code.sendsLeft }); setAttemptsLeft(r.code.attemptsLeft); }
+        setResume('ready');
+      }).catch(() => { if (active) setResume(Date.parse(session.expiresAt) <= Date.now() ? 'expired' : 'error'); });
+    return () => { active = false; };
+  }, [holdPath, session.hold, resumeVersion, props.setSession]);
+
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -450,14 +467,16 @@ function Held(props: {
       await fn();
     } catch (err) {
       setNotice(message(err));
+      if (err instanceof BuyerApiError && err.code === 'OTP_LOCKED') setAttemptsLeft(0);
+      if (err instanceof BuyerApiError && err.code === 'HOLD_EXPIRED') setResume('expired');
     } finally {
       setBusy(false);
     }
   };
 
   const sendCode = () => run(async () => {
-    const r = await buyerApi<{ sentTo: string; resendAfterSec: number; devCode?: string }>(`${holdPath}/otp`, { token: session.hold, body: { email } });
-    setSent({ to: r.sentTo, at: Date.now(), resendAfterSec: r.resendAfterSec, devCode: r.devCode });
+    const r = await buyerApi<{ sentTo: string; resendAfterSec: number; sendsLeft: number; devCode?: string }>(`${holdPath}/otp`, { token: session.hold, body: { email } });
+    setSent({ to: r.sentTo, at: Date.now(), resendAfterSec: r.resendAfterSec, sendsLeft: r.sendsLeft, devCode: r.devCode });
   });
 
   const confirm = (e: FormEvent) => {
@@ -469,7 +488,9 @@ function Held(props: {
     });
   };
 
-  if (left <= 0) {
+  if (resume === 'loading' || resume === 'error') return <Page header={<CompactHeader drop={drop} />}><div className="p-4"><StateCard icon={<Clock />} iconClass="bg-brand-tint text-brand-text" title={resume === 'loading' ? 'Restoring your reservation…' : 'Could not restore your reservation'} action={resume === 'error' ? <Button onClick={() => setResumeVersion(n => n+1)}>Retry</Button> : undefined}>Your hold timer continues while reconnecting.</StateCard></div></Page>;
+
+  if (left <= 0 || resume === 'expired') {
     return (
       <Page header={<CompactHeader drop={drop} />}>
         <main className="p-4">
@@ -494,7 +515,7 @@ function Held(props: {
       bar={(
         <>
           <ErrorText>{notice}</ErrorText>
-          <Button size="lg" className="w-full" type="submit" form="checkout" disabled={busy || (needsCode && Boolean(sent) && code.length < 6)}>
+          <Button size="lg" className="w-full" type="submit" form="checkout" disabled={busy || attemptsLeft === 0 || (needsCode && Boolean(sent) && code.length < 6)}>
             {busy ? <><Spinner />Please wait…</> : needsCode && !sent ? 'Send code' : `Confirm order · ${total}`}
           </Button>
           <p className="text-center text-[13px] text-muted">{needsCode && !sent ? 'We email you a 6-digit code to check it is you.' : 'You pay the shop directly after confirming.'}</p>
@@ -523,7 +544,7 @@ function Held(props: {
           </div>
           <Field label="Name"><Input required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" /></Field>
           <Field label="Email" help="One order per email for this drop. The shop uses it to contact you about collection.">
-            <Input required type="email" value={email} readOnly={Boolean(sent)} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
+            <Input required type="email" value={email}  onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
           </Field>
           <p className="text-xs leading-snug text-muted">
             Your name and email go to {drop.merchant.name} for this order and are deleted 180 days after the drop.{' '}
@@ -538,11 +559,12 @@ function Held(props: {
             {sent.devCode && (
               <p className="rounded-xl bg-brand-tint px-3 py-2 text-sm text-ink">Test mode, no email sent: your code is <strong className="tabular">{sent.devCode}</strong></p>
             )}
+            <p className="text-xs text-muted">Use the email address this code was sent to. {sent.sendsLeft} resends remaining.{attemptsLeft === 0 && " No attempts left. Wait for this hold to expire, then join again."}</p>
             <CodeInput value={code} onChange={setCode} disabled={busy} />
             <div className="flex items-center justify-between gap-3">
               <span className="text-[13px] text-muted">Didn&apos;t get it? Check spam.</span>
-              <Button type="button" variant="outline" disabled={busy || resendIn > 0} onClick={() => void sendCode()}>
-                {resendIn > 0 ? `Resend in ${resendIn}s` : 'Resend code'}
+              <Button type="button" variant="outline" disabled={busy || resendIn > 0 || sent.sendsLeft === 0 || attemptsLeft === 0} onClick={() => void sendCode()}>
+                {sent.sendsLeft === 0 ? 'No resends left' : resendIn > 0 ? `Resend in ${resendIn}s` : 'Resend code'}
               </Button>
             </div>
           </Card>
@@ -561,7 +583,7 @@ function CopyRow({ label, value, last }: { label: string; value: string; last?: 
   );
 }
 
-function Confirmed({ c, drop, fresh }: { c: Confirmation; drop: PublicDrop; fresh?: boolean }) {
+function Confirmed({ c, drop, fresh, cancelled }: { c: Confirmation; drop: PublicDrop; fresh?: boolean; cancelled?: boolean }) {
   // Celebrate once per order, not on every visit.
   useEffect(() => {
     if (!fresh || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
@@ -599,7 +621,7 @@ function Confirmed({ c, drop, fresh }: { c: Confirmation; drop: PublicDrop; fres
           <div className="flex justify-between px-5 py-3.5 text-[15px]"><span>{c.qty} × {c.variantName}</span><span className="tabular font-extrabold">{total}</span></div>
         </Card>
 
-        <Card className="flex flex-col gap-1">
+        {cancelled ? <StateCard icon={<XCircle />} iconClass="bg-danger-tint text-danger" title="This drop was cancelled">Your order reference is preserved. Contact {c.merchant.name} about collection or a refund if you already paid. Do not make a new payment until the shop confirms what happens next.</StateCard> : <Card className="flex flex-col gap-1">
           <div className="mb-1.5 flex items-center gap-2.5">
             <span className="flex size-9 items-center justify-center rounded-[10px] bg-brand-tint text-brand-text"><CreditCard className="size-[18px]" /></span>
             <h2 className="font-display text-lg font-bold">{c.merchant.paynow ? `Pay ${total} by PayNow` : 'Payment'}</h2>
@@ -614,9 +636,9 @@ function Confirmed({ c, drop, fresh }: { c: Confirmation; drop: PublicDrop; fres
           ) : (
             <p className="text-sm text-muted">{c.merchant.name} will contact you about payment.</p>
           )}
-        </Card>
+        </Card>}
 
-        {c.merchant.fulfilmentNote && (
+        {!cancelled && c.merchant.fulfilmentNote && (
           <Card className="flex items-start gap-3">
             <span className="flex size-9 shrink-0 items-center justify-center rounded-[10px] bg-brand-tint text-brand-text"><MapPin className="size-[18px]" /></span>
             <span className="flex flex-col gap-1"><span className="font-bold">Collection</span><span className="text-sm leading-relaxed text-muted">{c.merchant.fulfilmentNote}</span></span>
