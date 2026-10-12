@@ -20,7 +20,7 @@ cd infra
 npx cdk deploy DropDeck-UiReview -c review=true --require-approval never --outputs-file review-outputs.json
 ```
 
-Share the `ReviewUrl` output. The `/` page is the scenario gallery; buyer URLs like `/d/preview/held/` and the merchant console at `/m/` use the same static export. The banner labels all screens as simulated. The review stack owns its own private S3 bucket and CloudFront distribution, leaving `DropDeck-staging` untouched.
+Share the `ReviewUrl` output for the familiar landing page, and append `/__preview/` for the scenario gallery. Buyer URLs like `/d/preview/held/` and the merchant console at `/m/` use the same static export. The banner labels all screens as simulated. The review stack owns its own private S3 bucket and CloudFront distribution, leaving `DropDeck-staging` untouched.
 
 When review is finished, remove the temporary site:
 

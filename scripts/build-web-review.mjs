@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -16,6 +16,10 @@ if (!html.includes('Preparing local preview')) throw new Error('Review build did
 if (!existsSync(path.join(out, 'd/index.html')) || !existsSync(path.join(out, 'm/index.html'))) {
   throw new Error('Review build is missing buyer or merchant pages');
 }
+// Both routes hydrate the same shell; the provider selects the gallery only at /__preview/.
+// Keep the familiar landing page at / while making the scenario gallery a separate static URL.
+mkdirSync(path.join(out, '__preview'), { recursive: true });
+copyFileSync(path.join(out, 'index.html'), path.join(out, '__preview/index.html'));
 // A developer may have copied a real stage's public config locally. Never include it in the review site.
 rmSync(path.join(out, 'config.json'), { force: true });
 rmSync(reviewOut, { recursive: true, force: true });

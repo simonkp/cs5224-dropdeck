@@ -9,14 +9,14 @@ export function PreviewProvider({ children }: { children: ReactNode }) {
     if (process.env.NEXT_PUBLIC_DROPDECK_DEMO === '1') {
       import('../lib/preview/local').then((m) => {
         m.install();
-        if (location.pathname === '/__preview/' || (process.env.NODE_ENV === 'production' && location.pathname === '/')) setGallery(<m.Gallery />);
+        if (location.pathname === '/__preview/') setGallery(<m.Gallery />);
         setReady(true);
       });
     }
   }, []);
   if (process.env.NEXT_PUBLIC_DROPDECK_DEMO === '1') {
     if (!ready) return <p className="p-6">Preparing local preview…</p>;
-    return <><div className="relative z-40 flex flex-wrap items-center justify-center gap-x-4 bg-[#d4ff3a] px-3 py-2 text-xs font-bold text-[#101114]">DESIGN REVIEW · simulated data<a className="underline" href={process.env.NODE_ENV === 'production' ? '/' : '/__preview/'}>Scenarios & reset</a></div>{gallery ?? children}</>;
+    return <><div className="relative z-40 flex flex-wrap items-center justify-center gap-x-4 bg-[#d4ff3a] px-3 py-2 text-xs font-bold text-[#101114]">DESIGN REVIEW · simulated data<a className="underline" href="/__preview/">Scenarios & reset</a></div>{gallery ?? children}</>;
   }
   return children;
 }
