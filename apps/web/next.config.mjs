@@ -4,6 +4,7 @@ export default (phase) => {
   const development = phase === PHASE_DEVELOPMENT_SERVER;
   const demo = process.env.DROPDECK_DEMO === '1' && (development || process.env.DROPDECK_REVIEW_BUILD === '1');
   return {
+    agentRules: false,
     ...(development ? {} : { output: 'export' }),
     trailingSlash: true,
     images: { unoptimized: true },
