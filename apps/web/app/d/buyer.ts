@@ -46,7 +46,7 @@ export interface BuyerDetails {
   email: string;
 }
 
-const DETAILS_KEY = process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_DROPDECK_DEMO === '1' ? 'dd.preview.details' : 'dd.buyer.details';
+const DETAILS_KEY = process.env.NEXT_PUBLIC_DROPDECK_DEMO === '1' ? 'dd.preview.details' : 'dd.buyer.details';
 
 export function loadDetails(): BuyerDetails {
   try {

@@ -3,6 +3,7 @@ dist/
 cdk.out/
 .next/
 out/
+review-out/
 coverage/
 *.log
 .env*

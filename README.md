@@ -130,3 +130,5 @@ The checkout test code is `123456`; no email or payment is sent. Reset fixtures 
 The local preview simulates services. Connected Cognito, SES, CloudFront and scheduled-controller checks require a development AWS deployment.
 
 Production export is unchanged: `pnpm web:build`, then `pnpm web:verify-production` verifies that demo fixtures and the preview route are excluded.
+
+To share the simulated gallery through a separate CloudFront distribution, see [the review deployment guide](docs/review-cloudfront.md).

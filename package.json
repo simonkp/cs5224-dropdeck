@@ -12,6 +12,7 @@
     "test": "pnpm -r test",
     "synth": "pnpm --filter infra synth",
     "web:build": "pnpm --filter web build",
+    "web:review-build": "node scripts/build-web-review.mjs",
     "test:int": "scripts/test-int.sh",
     "seed": "pnpm --filter @dropdeck/eval seed",
     "demo:reset": "scripts/demo-reset.sh",
