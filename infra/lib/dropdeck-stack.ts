@@ -288,6 +288,7 @@ export class DropDeckStack extends Stack {
       });
       return new NodejsFunction(this, name, {
         entry: path.join(repoRoot, entry),
+        projectRoot: repoRoot,
         runtime: Runtime.NODEJS_22_X,
         architecture: Architecture.ARM_64,
         memorySize: extra.memory ?? 512,
