@@ -3,11 +3,13 @@ import type { Drop, MerchantProfile, Order, PublicDrop } from '@dropdeck/shared'
 import { buildReport, ordersCsv } from '../../../../services/merchant-api/src/reports';
 import { saveSession } from '../../app/d/buyer';
 import { operatorPreview } from './operations';
+import { analyticsCapabilities } from '@dropdeck/shared/plans';
+import { summarizeSales, trackingOf } from '@dropdeck/shared/merchant-analytics';
 
 const KEY = 'dd.preview.v2';
 const iso = (ms: number) => new Date(ms).toISOString();
 const scenarios = ['countdown', 'entry', 'drawing', 'queued', 'admitted', 'held', 'code-sent', 'confirmed', 'reserved', 'expired', 'closed', 'cancelled', 'missing', 'kopi', 'hue', 'turn-expired', 'closed-hold', 'cancelled-order', 'delayed'];
-interface Data { profile: MerchantProfile; drops: Drop[]; orders: Order[]; holds: Record<string, { dropId: string; expiresAt: string; variantId: string; qty: number; sentAt?: number; sends: number; attempts: number; email?: string; confirmed?: boolean; orderRef?: string }>; seeded: string[] }
+interface Data { profile: MerchantProfile; drops: Drop[]; orders: Order[]; history?: Record<string, Array<Record<string,unknown>>>; holds: Record<string, { dropId: string; expiresAt: string; variantId: string; qty: number; sentAt?: number; sends: number; attempts: number; email?: string; confirmed?: boolean; orderRef?: string }>; seeded: string[] }
 let data: Data;
 let installed = false;
 const persist = () => localStorage.setItem(KEY, JSON.stringify(data));
@@ -71,6 +73,28 @@ export function install() {
     if (/^\/s\/[^/]+\/shop.json$/.test(p)) return response({ tenantId: 'preview', merchant: data.profile, generatedAt: iso(Date.now()), drops: data.drops.filter(d => d.state !== 'Draft').map(d => ({ ...publicDrop(d.dropId), state: d.state, url: `/d/preview/${d.dropId}/`, fromPriceCents: 1200 })) });
     if (!p.startsWith('/__local/')) return original(input, init);
     const path = p.slice('/__local'.length);
+    if(path==='/m/analytics'||path==='/m/analytics/export.csv') {
+      const advanced=url.searchParams.get('advanced')==='1'||path.endsWith('.csv');
+      const capabilities={tier:data.profile.tier,...analyticsCapabilities(data.profile.tier),enabled:true};
+      if(advanced&&!capabilities.advancedPreview)return error('PLAN_LIMIT','Advanced analytics preview is available only on Growth',402);
+      const from=url.searchParams.get('from')??iso(Date.now()-6*86400000).slice(0,10);const to=url.searchParams.get('to')??iso(Date.now()).slice(0,10);
+      if((Date.parse(to)-Date.parse(from))/86400000+1>(advanced?90:31))return error('VALIDATION','Select a shorter date range');
+      const ds=data.drops.filter(d=>d.state!=='Draft'&&(!url.searchParams.get('dropId')||d.dropId===url.searchParams.get('dropId')));
+      const report=summarizeSales(data.orders.filter(o=>ds.some(d=>d.dropId===o.dropId)),ds,from,to,advanced);
+      if(path.endsWith('.csv'))return new Response(['day,orders,confirmed_sgd,recorded_paid_sgd',...report.days.map(d=>[d.day,d.orders,d.confirmedCents/100,d.paidCents/100].join(','))].join('\r\n'),{headers:{'content-type':'text/csv'}});
+      return response({enabled:true,capabilities,advanced,preview:advanced,generatedAt:iso(Date.now()),from,to,scope:{drops:ds.length,availableDrops:ds.length,maxOrdersPerDrop:500,partial:false},...report});
+    }
+    if(path==='/m/order-worklist')return response({enabled:true,rows:data.orders.filter(o=>o.dropId===url.searchParams.get('dropId')&&(!url.searchParams.get('payment')||trackingOf(o).paymentStatus===url.searchParams.get('payment'))&&(!url.searchParams.get('fulfillment')||trackingOf(o).fulfillmentStatus===url.searchParams.get('fulfillment')))});
+    const trackingRoute=path.match(/^\/m\/orders\/([^/]+)\/(tracking|history)$/);
+    if(trackingRoute){
+      const o=data.orders.find(o=>o.ref===trackingRoute[1]);if(!o)return error('NOT_FOUND','Order not found',404);
+      data.history??={};
+      if(trackingRoute[2]==='history')return response({rows:data.history[o.ref]??[],partial:false});
+      if((o.version??0)!==body.expectedVersion)return error('INVALID_STATE','Order changed. Refresh before saving again.',409);
+      const after={...trackingOf(o),...(body.patch as object)};o.tracking=after;o.version=(o.version??0)+1;
+      o.status=after.attendanceStatus==='no_show'?'no-show':after.paymentStatus==='paid'?'paid':'confirmed';
+      data.history[o.ref]=[{at:iso(Date.now()),actor:'preview',after,version:o.version,reason:body.reason??''},...(data.history[o.ref]??[])];persist();return response(o);
+    }
     if(path.startsWith('/admin/')) {
       const result=operatorPreview(path,url,data.profile,method,body);
       if(method==='PATCH'&&result.ok)persist();
@@ -91,6 +115,7 @@ export function install() {
       const action = merchantDrop[2]; const os = data.orders.filter(o => o.dropId === d.dropId);
       if (action === 'orders') return response(os);
       if (action === 'report') return response(buildReport(d, os, { earlyCount: 214, lateTickets: 10 }));
+      if (action === 'inventory') return response({state:d.state,generatedAt:iso(Date.now()),partial:false,ordersPartial:false,variants:d.variants.map(v=>{const confirmedUnits=os.filter(o=>o.variantId===v.id).reduce((n,o)=>n+o.qty,0);const out=Math.min(v.stock,confirmedUnits+6);return {...v,out,confirmedUnits,available:v.stock-out,complete:true};})});
       if (action === 'export.csv') return new Response(ordersCsv(os), { headers: { 'content-type': 'text/csv' } });
       if (action === 'live') return response({ state: d.state, variants: d.variants.map(v => ({ ...v, out: Math.min(v.stock, os.filter(o => o.variantId === v.id).reduce((n,o) => n+o.qty,0)+6) })), activeHolds: 7, orders: os.length, unitsOrdered: os.reduce((n,o) => n+o.qty,0), queue: { earlyCount: 214, lateTickets: 10 } });
       if (method === 'DELETE') data.drops = data.drops.filter(x => x !== d);

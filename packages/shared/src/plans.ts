@@ -37,6 +37,12 @@ export const PLANS: Record<Tier, Plan> = {
 
 export const TIERS = Object.keys(PLANS) as Tier[];
 
+/** Capabilities, not client-supplied tier claims, govern merchant analytics requests. */
+export function analyticsCapabilities(tier: unknown, previewEnabled = true) {
+  const growth = tier === 'growth' && previewEnabled;
+  return { basic: true, advancedPreview: growth, maxDays: growth ? 90 : 31, quickSightConnected: false as const };
+}
+
 /**
  * Drops that use up a month's allowance: anything scheduled, live or closed whose draw falls in that month, plus
  * cancelled drops that actually opened (the controller metered them). A drop cancelled before it opened is free.

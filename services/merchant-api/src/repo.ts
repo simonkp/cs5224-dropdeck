@@ -6,6 +6,8 @@ import {
 import { ApiError, keys, type Drop, type DropState, type MerchantProfile, type Order, type OrderStatus, type Usage } from '@dropdeck/shared';
 import { env } from './env.js';
 import { shardCapacities } from './validate.js';
+import { randomUUID } from 'node:crypto';
+import { retainedOrder, updateOrderTracking } from '@dropdeck/shared/order-tracking-store';
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), { marshallOptions: { removeUndefinedValues: true } });
 
@@ -201,6 +203,8 @@ export async function writeStockShards(drop: Drop): Promise<void> {
 }
 
 export async function listOrders(t: string, d: string): Promise<Order[]> {
+  const drop=await getDrop(t,d);
+  const expiry=Date.parse(drop.endAt)/1000+180*86400;
   const k = keys.orderPrefix(t, d);
   const out: Order[] = [];
   let start: Record<string, unknown> | undefined;
@@ -211,7 +215,7 @@ export async function listOrders(t: string, d: string): Promise<Order[]> {
       ExpressionAttributeValues: { ':pk': k.PK, ':sk': k.SKPrefix },
       ExclusiveStartKey: start,
     }));
-    out.push(...(r.Items ?? []).map((i) => strip<Order>(i)!));
+    out.push(...(r.Items ?? []).filter(i=>Number(i.ttl??expiry)*1000>Date.now()).map((i) => strip<Order>(i)!));
     start = r.LastEvaluatedKey;
   } while (start);
   return out.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -219,21 +223,10 @@ export async function listOrders(t: string, d: string): Promise<Order[]> {
 
 /** Merchant reconciliation: confirmed (awaiting payment), paid, or no-show. */
 export async function setOrderStatus(t: string, d: string, ref: string, status: OrderStatus): Promise<Order> {
-  try {
-    const r = await ddb.send(new UpdateCommand({
-      TableName: env.table(),
-      Key: keys.order(t, d, ref),
-      UpdateExpression: 'SET #s = :s, statusUpdatedAt = :now',
-      ConditionExpression: 'attribute_exists(PK)',
-      ExpressionAttributeNames: { '#s': 'status' },
-      ExpressionAttributeValues: { ':s': status, ':now': new Date().toISOString() },
-      ReturnValues: 'ALL_NEW',
-    }));
-    return strip<Order>(r.Attributes)!;
-  } catch (e) {
-    if (isConditionFailure(e)) throw new ApiError('NOT_FOUND', 'Order not found');
-    throw e;
-  }
+  const {order}=await retainedOrder(t,d,ref);
+  if(order.status===status)return order;
+  const patch=status==='no-show'?{attendanceStatus:'no_show'}:{attendanceStatus:'normal',paymentStatus:status==='paid'?'paid':'awaiting'};
+  return updateOrderTracking(t,d,ref,{expectedVersion:order.version??0,requestId:randomUUID(),patch});
 }
 
 /** Queue size: the frozen early group, and the late ticket counter (block-allocated, so an upper bound). */

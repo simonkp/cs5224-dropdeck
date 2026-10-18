@@ -13,6 +13,8 @@
     "./ddb": "./src/ddb.ts",
     "./branding": "./src/branding.ts",
     "./plans": "./src/plans.ts",
+    "./merchant-analytics": "./src/merchant-analytics.ts",
+    "./order-tracking-store": "./src/order-tracking-store.ts",
     "./lifecycle": "./src/lifecycle.ts"
   },
   "scripts": {

@@ -35,7 +35,7 @@ describe('orders CSV', () => {
   it('quotes commas and quotes, and defuses formulas in buyer-entered text', () => {
     const csv = ordersCsv([order('A', 'v1', 1, 'paid', 1, 'Lee, "Ann"'), order('B', 'v1', 1, 'paid', 2, '=HYPERLINK("x")')]);
     const lines = csv.trim().split('\r\n');
-    expect(lines[0]).toBe('ref,name,email,variant,qty,unit_price_sgd,amount_sgd,status,ordered_at');
+    expect(lines[0]).toBe('ref,name,email,variant,qty,unit_price_sgd,amount_sgd,status,ordered_at,payment_status,payment_method,payment_reference,fulfillment_method,fulfillment_status,carrier,tracking_reference,fulfill_by');
     expect(lines[1]).toContain('"Lee, ""Ann"""');
     expect(lines[2]).toContain(`"'=HYPERLINK(""x"")"`);
     expect(lines[1]).toContain(',9.00,9.00,paid,');

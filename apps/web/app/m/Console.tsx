@@ -2,7 +2,7 @@
 
 // Types only from @dropdeck/shared at runtime-sensitive spots: its index pulls in node:crypto via tokens.ts.
 import type { Drop, MerchantProfile } from '@dropdeck/shared';
-import { ArrowRight, LayoutGrid, LogOut, Shuffle, ShieldCheck, Store, CreditCard, User } from 'lucide-react';
+import { ArrowRight, LayoutGrid, LogOut, Shuffle, ShieldCheck, Store, CreditCard, User, ChartNoAxesCombined } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { Button } from '../../components/ui/button';
@@ -16,6 +16,7 @@ import { cn } from '../../lib/utils';
 import { DropEditor } from './DropEditor';
 import { DropsList } from './DropsList';
 import { OrdersView } from './OrdersView';
+import { AnalyticsView } from './AnalyticsView';
 import { ShopSettings } from './ShopSettings';
 import { ViewHeader, type ConsoleCtx, type Route } from './shared';
 import { useAssetUrl } from '../../lib/assets';
@@ -25,6 +26,7 @@ function parseRoute(search: string): Route {
   const q = new URLSearchParams(search);
   const id = q.get('drop') ?? '';
   switch (q.get('view')) {
+    case 'analytics': return { view: 'analytics' };
     case 'shop': return { view: 'shop' };
     case 'account': return { view: 'account' };
     case 'new': return { view: 'new' };
@@ -123,13 +125,14 @@ function ShopChip({ profile }: { profile: MerchantProfile | null }) {
     : <span style={brandStyle(profile?.colour, false)} className="flex size-9 shrink-0 items-center justify-center rounded-[10px] bg-brand font-display text-[13px] font-extrabold text-brand-fg">{initials(name)}</span>;
 }
 
-const NAV: Array<{ view: 'drops' | 'shop' | 'account'; label: string; icon: ReactNode }> = [
+const NAV: Array<{ view: 'drops' | 'shop' | 'account' | 'analytics'; label: string; icon: ReactNode }> = [
   { view: 'drops', label: 'Drops', icon: <LayoutGrid /> },
+  { view: 'analytics', label: 'Analytics', icon: <ChartNoAxesCombined /> },
   { view: 'shop', label: 'Shop', icon: <Store /> },
   { view: 'account', label: 'Account', icon: <User /> },
 ];
 
-const section = (r: Route): 'drops' | 'shop' | 'account' => (r.view === 'shop' || r.view === 'account' ? r.view : 'drops');
+const section = (r: Route): 'drops' | 'shop' | 'account' | 'analytics' => (r.view === 'shop' || r.view === 'account' || r.view === 'analytics' ? r.view : 'drops');
 
 function SignedIn() {
   const [route, go] = useRoute();
@@ -196,6 +199,7 @@ function SignedIn() {
             : view.view === 'new' ? <DropEditor ctx={ctx} />
             : view.view === 'edit' ? <DropEditor ctx={ctx} drop={drops?.find((d) => d.dropId === view.id)} loading={drops === null} />
             : view.view === 'orders' ? <OrdersView ctx={ctx} drop={drops?.find((d) => d.dropId === view.id)} loading={drops === null} />
+            : view.view === 'analytics' ? <AnalyticsView ctx={ctx} />
             : view.view === 'shop' ? <ShopSettings ctx={ctx} />
             : <Account profile={profile} />}
         </div>

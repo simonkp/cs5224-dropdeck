@@ -9,7 +9,7 @@ import { cn } from '../../lib/utils';
 
 export type Route =
   | { view: 'drops' } | { view: 'new' } | { view: 'edit'; id: string } | { view: 'orders'; id: string }
-  | { view: 'shop' } | { view: 'account' };
+  | { view: 'shop' } | { view: 'account' } | { view: 'analytics' };
 
 /** What every console view gets from the shell. */
 export interface ConsoleCtx {

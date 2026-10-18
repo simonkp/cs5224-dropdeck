@@ -64,6 +64,8 @@ function loginBranding(): Pick<CfnManagedLoginBranding, 'settings' | 'assets' | 
 export interface DropDeckStackProps extends StackProps {
   /** Opt-in per stage after reviewing monitoring cost and notification configuration. */
   operationsEnabled?: boolean;
+  merchantAnalyticsEnabled?: boolean;
+  growthAnalyticsPreviewEnabled?: boolean;
   stage: string;
   budgetUsd: number;
   budgetEmail: string;
@@ -304,6 +306,8 @@ export class DropDeckStack extends Stack {
 
     // 15 s: a profile save republishes every published drop page of the shop.
     const merchantFn = fn('MerchantApi', 'services/merchant-api/src/handler.ts', { timeout: 15 });
+    merchantFn.addEnvironment('MERCHANT_ANALYTICS_ENABLED',props.merchantAnalyticsEnabled?'1':'0');
+    merchantFn.addEnvironment('GROWTH_ANALYTICS_PREVIEW_ENABLED',props.growthAnalyticsPreviewEnabled?'1':'0');
     const ticketFn = fn('Ticket', 'services/ticket/src/handler.ts', { memory: 256 });
     ticketFn.addEnvironment('BLOCK_SIZE', String(props.ticketBlockSize ?? 10));
     const claimFn = fn('Claim', 'services/claim/src/handler.ts');
@@ -384,6 +388,9 @@ export class DropDeckStack extends Stack {
     const authorizer = new HttpUserPoolAuthorizer('MerchantAuth', userPool, { userPoolClients: [userPoolClient] });
     const merchantIntegration = new HttpLambdaIntegration('MerchantInt', merchantFn);
     const merchantRoutes: Array<[HttpMethod, string]> = [
+      [HttpMethod.GET, '/m/analytics'], [HttpMethod.GET, '/m/analytics/export.csv'], [HttpMethod.GET, '/m/order-worklist'],
+      [HttpMethod.GET, '/m/drops/{dropId}/inventory'],
+      [HttpMethod.PATCH, '/m/orders/{ref}/tracking'], [HttpMethod.GET, '/m/orders/{ref}/history'],
       [HttpMethod.GET, '/m/overview'],
       [HttpMethod.GET, '/m/profile'], [HttpMethod.PUT, '/m/profile'],
       [HttpMethod.GET, '/m/slugs/{slug}'], [HttpMethod.POST, '/m/uploads'], [HttpMethod.GET, '/m/usage'],

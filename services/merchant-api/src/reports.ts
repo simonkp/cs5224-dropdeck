@@ -1,4 +1,5 @@
 import type { Drop, Order, OrderStatus } from '@dropdeck/shared';
+import { trackingOf } from '@dropdeck/shared/merchant-analytics';
 
 /**
  * Post-drop numbers for the merchant, counted from orders only. Stock counters are not used: holds still open when
@@ -7,7 +8,7 @@ import type { Drop, Order, OrderStatus } from '@dropdeck/shared';
 export function buildReport(drop: Drop, orders: Order[], queue: { earlyCount: number | null; lateTickets: number }) {
   const units = (pred: (o: Order) => boolean) => orders.filter(pred).reduce((n, o) => n + o.qty, 0);
   const cents = (pred: (o: Order) => boolean) => orders.filter(pred).reduce((n, o) => n + o.amountCents, 0);
-  const is = (s: OrderStatus) => (o: Order) => o.status === s;
+  const is = (s: OrderStatus) => (o: Order) => s==='no-show'?trackingOf(o).attendanceStatus==='no_show':s==='paid'?trackingOf(o).paymentStatus==='paid':trackingOf(o).paymentStatus==='awaiting'&&trackingOf(o).attendanceStatus!=='no_show';
   const stock = drop.variants.reduce((n, v) => n + v.stock, 0);
   const ordered = units(() => true);
   const times = orders.map((o) => Date.parse(o.createdAt)).sort((a, b) => a - b);
@@ -43,7 +44,7 @@ const cell = (v: string | number) => {
 };
 
 export function ordersCsv(orders: Order[]): string {
-  const header = ['ref', 'name', 'email', 'variant', 'qty', 'unit_price_sgd', 'amount_sgd', 'status', 'ordered_at'];
-  const rows = orders.map((o) => [o.ref, o.name, o.email, o.variantName, o.qty, (o.unitPriceCents / 100).toFixed(2), (o.amountCents / 100).toFixed(2), o.status, o.createdAt]);
+  const header = ['ref', 'name', 'email', 'variant', 'qty', 'unit_price_sgd', 'amount_sgd', 'status', 'ordered_at', 'payment_status', 'payment_method', 'payment_reference', 'fulfillment_method', 'fulfillment_status', 'carrier', 'tracking_reference', 'fulfill_by'];
+  const rows = orders.map((o) => { const t=trackingOf(o); return [o.ref, o.name, o.email, o.variantName, o.qty, (o.unitPriceCents / 100).toFixed(2), (o.amountCents / 100).toFixed(2), o.status, o.createdAt,t.paymentStatus,t.paymentMethod??'',t.paymentReference??'',t.fulfillmentMethod,t.fulfillmentStatus,t.carrier??'',t.trackingReference??'',t.fulfillBy??'']; });
   return [header, ...rows].map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
 }
