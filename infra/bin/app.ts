@@ -33,6 +33,8 @@ const stack = review ? new ReviewSiteStack(app, 'DropDeck-UiReview', { env, redi
   ticketBlockSize: Number(app.node.tryGetContext('ticketBlockSize') ?? 10),
   mailFrom: setting('mailFrom'),
   operationsEnabled: setting('operationsEnabled') === 'true',
+  merchantAnalyticsEnabled: setting('merchantAnalyticsEnabled') === 'true',
+  growthAnalyticsPreviewEnabled: setting('growthAnalyticsPreviewEnabled') === 'true',
   resendFallback: setting('resendFallback') === 'true',
   domainName: setting('domainName'),
   certificateArn: setting('certificateArn'),

@@ -1,6 +1,7 @@
 'use client';
 
 import type { Drop, Order, OrderStatus } from '@dropdeck/shared';
+import { orderMatchesStatus, trackingOf } from '@dropdeck/shared/merchant-analytics';
 import { Download, Upload } from 'lucide-react';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Button } from '../../components/ui/button';
@@ -122,8 +123,8 @@ function Orders({ ctx, drop }: { ctx: ConsoleCtx; drop: Drop }) {
     }
   };
 
-  const shown = orders?.filter((o) => filter === 'all' || o.status === filter) ?? null;
-  const count = (f: Filter) => orders?.filter((o) => f === 'all' || o.status === f).length ?? 0;
+  const shown = orders?.filter((o) => filter === 'all' || orderMatchesStatus(o,filter)) ?? null;
+  const count = (f: Filter) => orders?.filter((o) => f === 'all' || orderMatchesStatus(o,f)).length ?? 0;
   const out = live?.variants.reduce((n, v) => n + v.out, 0) ?? 0;
   const stock = drop.variants.reduce((n, v) => n + v.stock, 0);
 
@@ -191,7 +192,8 @@ function Orders({ ctx, drop }: { ctx: ConsoleCtx; drop: Drop }) {
               <article key={o.ref} className="flex flex-col gap-2.5 rounded-[18px] border border-line bg-surface p-3.5">
                 <div className="flex items-baseline justify-between"><span className="font-mono text-sm font-semibold tracking-wide">{o.ref}</span><span className="tabular font-extrabold">{price(o.amountCents)}</span></div>
                 <div className="flex flex-col gap-0.5"><strong>{o.name}</strong><span className="truncate text-[13px] text-muted">{o.qty} × {o.variantName} · {o.email}</span></div>
-                <Segmented label={`Payment status for ${o.ref}`} value={o.status} disabled={saving === o.ref} onChange={(s) => void setStatus(o, s)} options={STATUS} className="rounded-xl" />
+                <Segmented label={`Order status for ${o.ref}`} value={o.status} disabled={saving === o.ref} onChange={(s) => void setStatus(o, s)} options={STATUS} className="rounded-xl" />
+                {o.tracking&&<p className="text-xs text-muted">Payment: {trackingOf(o).paymentStatus==='unknown'?'not recorded':trackingOf(o).paymentStatus} · Attendance: {trackingOf(o).attendanceStatus==='no_show'?'no-show':'normal'}</p>}
               </article>
             ))}
           </div>
@@ -211,7 +213,7 @@ function Orders({ ctx, drop }: { ctx: ConsoleCtx; drop: Drop }) {
                       <td className="px-4 py-3"><div className="font-bold">{o.name}</div><div className="text-xs text-muted">{o.email}</div></td>
                       <td className="px-4 py-3">{o.qty} × {o.variantName}</td>
                       <td className="tabular px-4 py-3 text-right font-bold">{price(o.amountCents)}</td>
-                      <td className="w-[280px] px-4 py-3"><Segmented label={`Payment status for ${o.ref}`} value={o.status} disabled={saving === o.ref} onChange={(s) => void setStatus(o, s)} options={STATUS} /></td>
+                      <td className="w-[280px] px-4 py-3"><Segmented label={`Order status for ${o.ref}`} value={o.status} disabled={saving === o.ref} onChange={(s) => void setStatus(o, s)} options={STATUS} />{o.tracking&&<p className="mt-1 text-xs text-muted">Payment: {trackingOf(o).paymentStatus==='unknown'?'not recorded':trackingOf(o).paymentStatus} · Attendance: {trackingOf(o).attendanceStatus==='no_show'?'no-show':'normal'}</p>}</td>
                     </tr>
                   ))}
                 </tbody>

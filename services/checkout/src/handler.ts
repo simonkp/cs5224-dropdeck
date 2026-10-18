@@ -28,7 +28,7 @@ const newRef = () => Array.from({ length: 8 }, () => REF_ALPHABET[randomInt(REF_
 /** Orders (a buyer's name and email) are deleted this long after the drop ends (decision 0014, PDPA retention). */
 export const ORDER_RETENTION_DAYS = 180;
 
-/** Never overwrite another buyer's order: the ref must be new, or already belong to this hold (a retry). */
+/** Idempotent creation must never reset merchant tracking on a confirmation retry. */
 async function putOrder(order: Order, dropEndAt: string): Promise<void> {
   try {
     await ddb.send(new PutCommand({
@@ -37,11 +37,14 @@ async function putOrder(order: Order, dropEndAt: string): Promise<void> {
         ...keys.order(order.tenantId, order.dropId, order.ref), type: 'Order', ...order,
         ttl: Math.floor(Date.parse(dropEndAt) / 1000) + ORDER_RETENTION_DAYS * 86_400,
       },
-      ConditionExpression: 'attribute_not_exists(PK) OR holdId = :h',
-      ExpressionAttributeValues: { ':h': order.holdId },
+      ConditionExpression: 'attribute_not_exists(PK)',
     }));
   } catch (e) {
-    if (isConditionFailure(e)) console.error(JSON.stringify({ level: 'error', msg: 'order ref collision', ref: order.ref, holdId: order.holdId }));
+    if(isConditionFailure(e)) {
+      const existing=await ddb.send(new GetCommand({TableName:table(),Key:keys.order(order.tenantId,order.dropId,order.ref),ConsistentRead:true}));
+      if(existing.Item?.holdId===order.holdId)return;
+      console.error(JSON.stringify({ level: 'error', msg: 'order ref collision', ref: order.ref, holdId: order.holdId }));
+    }
     throw e;
   }
 }
@@ -68,7 +71,7 @@ function buildOrder(drop: Drop, hold: Hold, ref: string, name: string, email: st
   return {
     tenantId: drop.tenantId, dropId: drop.dropId, ref, holdId: hold.holdId, variantId: hold.variantId,
     variantName: variant?.name ?? hold.variantId, qty: hold.qty, unitPriceCents: unit, amountCents: unit * hold.qty,
-    name, email, status: 'confirmed', createdAt: new Date(hold.createdAt).toISOString(),
+    name, email, status: 'confirmed', createdAt: new Date(hold.createdAt).toISOString(), confirmedAt:new Date().toISOString(),version:1,
   };
 }
 

@@ -14,7 +14,9 @@
     ],
     "stageSettings": {
       "staging": {
-        "operationsEnabled": true
+        "operationsEnabled": true,
+        "merchantAnalyticsEnabled": true,
+        "growthAnalyticsPreviewEnabled": true
       }
     }
   }

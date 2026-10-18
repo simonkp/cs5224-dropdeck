@@ -193,4 +193,7 @@ export interface Order {
   email: string;
   status: OrderStatus;
   createdAt: string;
+  confirmedAt?: string;
+  version?: number;
+  tracking?: import('./merchant-analytics.js').OrderTracking;
 }
