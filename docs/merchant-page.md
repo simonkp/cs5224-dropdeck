@@ -4,7 +4,7 @@ This document describes the merchant features implemented on `feat/merchant-anal
 
 ## Implementation summary
 
-The merchant console combines drop management, per-drop order reports and an Analytics workspace with Overview, Inventory, Payments and Fulfillment views. Growth merchants also receive an Advanced preview. Payments and fulfillment are recorded manually by the merchant.
+The merchant console combines drop management, per-drop order reports and an Analytics workspace with Overview, Inventory, Payments and Pickup & delivery views. Growth merchants also receive an Advanced preview. Payments, pickups and deliveries are recorded manually by the merchant.
 
 Reporting reads the existing tenant-owned DynamoDB orders on demand. The backend bounds the work and returns coverage information instead of maintaining a separate reporting pipeline. This implementation adds no analytics table, stream consumer, export queue or paid BI subscription. Its reports reflect retained source records and have the limits described below.
 
@@ -26,15 +26,15 @@ Plan prices and usage billing are unchanged. The backend reads the merchant's cu
 
 ### Shop and drops
 
-A merchant signs in through Cognito and sets up the shop profile, branding, public slug, PayNow instructions and fulfillment note. The Drops view supports drafting, scheduling, unscheduling before the entry window, cancelling, duplicating, sharing and deleting drafts, subject to lifecycle and plan limits.
+A merchant signs in through Cognito and sets up the shop profile, branding, public slug, PayNow instructions and pickup/delivery note. The Drops view supports drafting, scheduling, unscheduling before the entry window, cancelling, duplicating, sharing and deleting drafts, subject to lifecycle and plan limits.
 
 Scheduling writes stock shards, publishes public drop/state files and creates the controller schedule. The controller drives the drop lifecycle and public state. Merchant reports do not allocate or release inventory.
 
 ### Overview and sales results
 
-Open Analytics, select a date range and optionally an individual drop. Dates use Singapore calendar boundaries and amounts use SGD. The Overview shows confirmed order value, recorded paid value, awaiting-payment value, average order value, daily sales bars and fulfillment counts. The chart has an expandable exact-value table.
+Open Analytics, select a date range and optionally an individual drop. Dates use Singapore calendar boundaries and amounts use SGD. The Overview shows confirmed order value, recorded paid value, awaiting-payment value, average order value, daily sales bars and pickup/delivery counts. The chart has an expandable exact-value table.
 
-Summary cards link to Payments or Fulfillment. Overview refreshes every 60 seconds while the page is visible; Refresh requests another snapshot and reloads the merchant profile. Failed refreshes display an error and identify any retained values as old.
+Summary cards link to Payments or Pickup & delivery. Overview refreshes every 60 seconds while the page is visible; Refresh requests another snapshot and reloads the merchant profile. Failed refreshes display an error and identify any retained values as old.
 
 All-drop reports cover up to 20 recent non-draft drops, with one query page of at most 500 orders per drop and four concurrent queries. Responses identify the number of covered drops and whether any page was truncated. A partial result is not a complete merchant-wide total. Selecting a drop narrows the scope but a large individual drop can still exceed the page limit.
 
@@ -46,21 +46,21 @@ Inventory covers the whole selected drop, independent of the sales-date filter. 
 
 ### Payments
 
-Select Payments and a drop, filter by awaiting, paid or unknown payment, and open an order. Record the payment status, method/reference, fulfillment details and a note, then save. These are the merchant's own records; DropDeck does not contact a bank, transfer funds or verify a PayNow receipt.
+Select Payments and a drop, filter by awaiting, paid or unknown payment, and open an order. Record the payment status, method/reference, pickup/delivery details and a note, then save. These are the merchant's own records; DropDeck does not contact a bank, transfer funds or verify a PayNow receipt.
 
 New and legacy orders retain their existing order reference. Legacy `paid` maps to recorded paid; legacy `confirmed` maps to awaiting; legacy `no-show` maps to unknown payment because the old single field cannot establish prior payment history. A no-show can be paid, so attendance is now tracked independently.
 
 Reversing a paid status requires a reason in the Analytics editor. The older per-drop status route uses the same safe update function; a reversal requiring a reason must be performed in Analytics. The older report keeps its awaiting/no-show presentation while recognizing paid no-shows from the separate tracking fields.
 
-### Fulfillment
+### Pickup & delivery
 
-Select Fulfillment and a drop, open an order and choose pickup or shipping. Pickup supports ready/collected; shipping supports ready/shipped/delivered. Unknown, not-started and exception states are available for unfinished or uncertain work. Carrier and tracking reference are required to record shipped or delivered. A merchant can record a known outcome directly; this is not an automated courier event feed.
+Select Pickup & delivery and a drop, open an order and choose pickup or shipping. Pickup supports ready/collected; shipping supports ready/shipped/delivered. Unknown, not-started and exception states are available for unfinished or uncertain work. Carrier and tracking reference are required to record shipped or delivered. A merchant can record a known outcome directly; this is not an automated courier event feed.
 
 Marking an unpaid order shipped, delivered or collected requires an explicit override reason. Reversing collected/delivered also requires a reason. An optional due time supports overdue counts. Dispatch and completion timestamps are recorded when those status transitions are saved.
 
-No shipping address is collected by this feature. Merchants use their existing shipping arrangements and record the resulting carrier/reference. Recording payment, attendance or fulfillment does not refund money, return stock, generate a shipping label or send a buyer notification.
+No shipping address is collected by this feature. Merchants use their existing shipping arrangements and record the resulting carrier/reference. Recording payment, attendance, pickup or delivery does not refund money, return stock, generate a shipping label or send a buyer notification.
 
-Payment/fulfillment worklists cover retained orders for the selected drop; they do not apply the sales-chart date filter. Each server page evaluates at most 50 orders before applying a status filter. An empty filtered page can have a next page. Cursors are bound to the authenticated tenant and drop. Refresh orders reloads the current page. Export this page downloads the displayed worklist rows and tracking fields without buyer names, emails or notes; references can still be sensitive data.
+Payment and pickup/delivery worklists cover retained orders for the selected drop; they do not apply the sales-chart date filter. Each server page evaluates at most 50 orders before applying a status filter. An empty filtered page can have a next page. Cursors are bound to the authenticated tenant and drop. Refresh orders reloads the current page. Export this page downloads the displayed worklist rows and tracking fields without buyer names, emails or notes; references can still be sensitive data.
 
 ### Growth advanced preview
 
@@ -79,8 +79,8 @@ Growth may export a complete advanced selection as a synchronous daily-summary C
 | Awaiting payment | Amount explicitly marked awaiting; unknown payments are separate |
 | Average order | Confirmed value divided by order count; unavailable for zero orders |
 | No-show units | Units on orders marked no-show, independently of payment |
-| Fulfillment open | Orders with a known unfinished fulfillment state |
-| Unknown fulfillment | Orders whose fulfillment status has not been established |
+| Awaiting pickup / delivery | Orders with a known unfinished fulfillment state |
+| Unknown pickup / delivery | Orders whose fulfillment status has not been established |
 | Past due | Unfinished orders whose merchant-entered due time has passed |
 | Comparison sell-through | Ordered units in the selected sales period / the drop's full allocation; includes no-shows |
 
