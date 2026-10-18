@@ -2,6 +2,7 @@
 import type { Drop, MerchantProfile, Order, PublicDrop } from '@dropdeck/shared';
 import { buildReport, ordersCsv } from '../../../../services/merchant-api/src/reports';
 import { saveSession } from '../../app/d/buyer';
+import { operatorPreview } from './operations';
 
 const KEY = 'dd.preview.v2';
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -70,6 +71,7 @@ export function install() {
     if (/^\/s\/[^/]+\/shop.json$/.test(p)) return response({ tenantId: 'preview', merchant: data.profile, generatedAt: iso(Date.now()), drops: data.drops.filter(d => d.state !== 'Draft').map(d => ({ ...publicDrop(d.dropId), state: d.state, url: `/d/preview/${d.dropId}/`, fromPriceCents: 1200 })) });
     if (!p.startsWith('/__local/')) return original(input, init);
     const path = p.slice('/__local'.length);
+    if(path.startsWith('/admin/'))return operatorPreview(path,url,data.profile);
     if (path === '/m/profile') { if (method === 'PUT') { data.profile = { ...data.profile, ...body }; persist(); } return response(data.profile); }
     if (path === '/m/uploads') { const raw = String(body.image); return response({ path: `data:image/${raw.startsWith('iVBOR') ? 'png' : raw.startsWith('/9j/') ? 'jpeg' : 'webp'};base64,${raw}` }); }
     if (path === '/m/usage') return response({ tier: 'growth', plan: { label: 'Preview', monthlySgd: 0, perDropSgd: 0, dropsPerMonth: null, unitsPerMonth: null, sessionsIncluded: null }, months: [{ month: iso(Date.now()).slice(0,7), drops: 1, cancelled: 0, sessions: 224, orders: 31 }] });

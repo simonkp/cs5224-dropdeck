@@ -11,7 +11,7 @@ async function walk(dir) {
   return files;
 }
 const files = await walk(root);
-const forbidden = ['dd.preview.v2', 'LOCAL_PREVIEW_UNSUPPORTED', 'LOCAL PREVIEW · simulated data', "return\"local-preview\""];
+const forbidden = ['dd.preview.v2', 'LOCAL_PREVIEW_UNSUPPORTED', 'LOCAL PREVIEW · simulated data', 'DESIGN REVIEW · simulated data', 'Unknown operator preview endpoint', 'return["operators"]', "return\"local-preview\""];
 for (const path of files) {
   if (path.includes('/__preview/')) throw new Error(`Demo route exported: ${path}`);
   if (!/\.(js|html|json)$/.test(path)) continue;

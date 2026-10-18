@@ -7,6 +7,8 @@ import {
 import { ddb, getDrop, getProfile, isConditionFailure, listDrops, listFeatured, syncFeatured, table } from '@dropdeck/shared/ddb';
 import { activeHoldCount, closeDrop, soldOutFlags, sweepExpired, unitsSold, voidActiveHolds } from './ops.js';
 import { writeFeaturedJson, writeShopJson, writeState } from './publish.js';
+import { healthEvent } from '@dropdeck/shared/observability';
+const heartbeats = new Map<string, number>();
 import { deleteTickSchedule, upsertTickSchedule } from './schedule.js';
 
 /**
@@ -47,7 +49,9 @@ async function refreshShop(t: string, changed: Drop): Promise<void> {
       await syncFeatured(profile, [changed]);
       await writeFeaturedJson(toPublicFeatured(await listFeatured()));
     }
+    healthEvent('publication', t, changed.dropId, { publication:'shop', succeeded:true });
   } catch (e) {
+    healthEvent('publication', t, changed.dropId, { publication:'shop', succeeded:false });
     console.error(JSON.stringify({ level: 'error', msg: 'shop.json refresh failed', t, err: String(e) }));
   }
 }
@@ -196,7 +200,7 @@ async function finish(drop: Drop, nowMs: number, soldOut?: Record<string, boolea
     if (voided) log('holds voided on cancel', { t: drop.tenantId, d: drop.dropId, voided });
   }
   await writeState(drop.tenantId, drop.dropId, {
-    state: drop.state, serverTime: new Date(nowMs).toISOString(), rThreshold: 0, nWatermark: 0,
+    state: drop.state, sourceVersion: drop.version, serverTime: new Date(nowMs).toISOString(), rThreshold: 0, nWatermark: 0,
     earlyCount: drop.earlyCount ?? null, soldOut: soldOut ?? soldOutFlags(drop, await unitsSold(drop)),
   });
   await meter(drop);
@@ -207,6 +211,12 @@ async function finish(drop: Drop, nowMs: number, soldOut?: Record<string, boolea
 /** One tick. Returns the state it published (or would have), or null when the drop is no longer Live. */
 export async function tickOnce(t: string, d: string, nowMs: number, last?: PublicState): Promise<PublicState | null> {
   const drop = await getDrop(t, d); // fresh each tick: state and earlyCount must be current
+  const heartbeatKey = `${t}/${d}`;
+  if (!heartbeats.has(heartbeatKey) || nowMs - heartbeats.get(heartbeatKey)! >= 15_000) {
+    healthEvent('heartbeat', t, d, { title: drop.title, lifecycle: drop.state, sourceVersion: drop.version });
+    heartbeats.set(heartbeatKey, nowMs);
+    if (heartbeats.size > 1000) heartbeats.delete(heartbeats.keys().next().value!);
+  }
   if (drop.state === 'Closed' || drop.state === 'Cancelled') {
     await finish(drop, nowMs);
     return null;
@@ -231,7 +241,7 @@ export async function tickOnce(t: string, d: string, nowMs: number, last?: Publi
   const wm = early === undefined
     ? { rThreshold: 0, nWatermark: 0 }
     : watermark(admittedCount(start, dropAdmissionRate(drop), nowMs), early);
-  const state: PublicState = { state: 'Live', serverTime: new Date(nowMs).toISOString(), ...wm, earlyCount: early ?? null, soldOut };
+  const state: PublicState = { state: 'Live', sourceVersion: drop.version, serverTime: new Date(nowMs).toISOString(), ...wm, earlyCount: early ?? null, soldOut };
   // Publish only when something changed (the first tick of each invocation always publishes).
   const moved = !last || wm.rThreshold > last.rThreshold || wm.nWatermark > last.nWatermark
     || state.earlyCount !== last.earlyCount || JSON.stringify(soldOut) !== JSON.stringify(last.soldOut);

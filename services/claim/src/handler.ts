@@ -7,6 +7,7 @@ import {
 } from '@dropdeck/shared';
 import { ddb, getDropCached, getHold, isConditionFailure, returnUnits, table } from '@dropdeck/shared/ddb';
 import { ssmSecret } from '@dropdeck/shared/secrets';
+import { observeRequest } from '@dropdeck/shared/observability';
 
 /**
  * POST /api/d/{tenantId}/{dropId}/claim   { ticket, variantId, qty? }
@@ -52,7 +53,8 @@ function holdResponse(statusCode: number, hold: Hold, key: string) {
   return json(statusCode, { hold: token, holdId: hold.holdId, expiresAt: new Date(hold.expiresAt).toISOString(), variantId: hold.variantId, qty: hold.qty });
 }
 
-export async function handler(event: APIGatewayProxyEventV2) {
+export const handler = (event: APIGatewayProxyEventV2) => observeRequest('claim', event, () => handle(event));
+async function handle(event: APIGatewayProxyEventV2) {
   try {
     const t = event.pathParameters?.tenantId;
     const d = event.pathParameters?.dropId;

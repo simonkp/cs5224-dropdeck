@@ -68,6 +68,7 @@ export async function sendCode(drop: Drop, hold: Hold, rawEmail: unknown, key: s
   }
 
   await sendMail({
+    tenantId: drop.tenantId, dropId: drop.dropId,
     to: email,
     subject: `Your code for ${drop.title}: ${code}`,
     text: `Your DropDeck code is ${code}.\n\nEnter it to confirm your order for "${drop.title}". It expires in 10 minutes or when your hold ends, whichever is sooner.\n\nIf you did not ask for this, ignore this email.`,

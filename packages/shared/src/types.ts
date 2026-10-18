@@ -141,6 +141,8 @@ export interface PublicShop {
 
 /** Written to state.json by the controller; buyers poll it from CloudFront. */
 export interface PublicState {
+  /** Source drop revision for operator diagnostics; not an inventory or admission authority. */
+  sourceVersion?: number;
   state: DropState;
   serverTime: string;
   /** Admitted share of the early group, 0..1. */

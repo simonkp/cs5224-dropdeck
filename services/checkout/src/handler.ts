@@ -8,6 +8,7 @@ import {
 import { ddb, getDropCached, getHold, getProfile, isConditionFailure, releaseHold, strip, table } from '@dropdeck/shared/ddb';
 import { ssmSecret } from '@dropdeck/shared/secrets';
 import { checkCode, codeStatus, sendCode } from './otp.js';
+import { attributeDrop, observeRequest, healthEvent } from '@dropdeck/shared/observability';
 
 /**
  * GET  /api/holds/{holdId}           resume a hold (or its confirmation) after a refresh
@@ -131,18 +132,21 @@ async function confirm(drop: Drop, hold: Hold, body: { name?: unknown; email?: u
     })).catch(() => undefined);
     throw new ApiError('HOLD_EXPIRED', 'Your hold has expired');
   }
+  if(verifiedHash) healthEvent('otpVerified',drop.tenantId,drop.dropId);
   const order = buildOrder(drop, hold, ref, name, email);
   await putOrder(order, drop.endAt);
   console.log(JSON.stringify({ metric: 'order', t: drop.tenantId, d: drop.dropId, ref, holdId: hold.holdId, qty: hold.qty, msFromHold: now - hold.createdAt }));
   return confirmation(drop, order);
 }
 
-export async function handler(event: APIGatewayProxyEventV2) {
+export const handler = (event: APIGatewayProxyEventV2) => observeRequest(event.routeKey?.endsWith('/otp') ? 'otp' : 'checkout', event, () => handle(event));
+async function handle(event: APIGatewayProxyEventV2) {
   try {
     const holdId = event.pathParameters?.holdId;
     const token = (event.headers?.authorization ?? '').replace(/^Bearer\s+/i, '');
     const now = Date.now();
     const c = verifyHold(token, await tokenKey(), now);
+    attributeDrop(c.t, c.d);
     if (!holdId || c.h !== holdId) throw new ApiError('BAD_TOKEN', 'Token is for a different hold');
     const [drop, hold] = await Promise.all([getDropCached(c.t, c.d), getHold(c.t, c.d, c.h)]);
     if (!hold) throw new ApiError('HOLD_EXPIRED', 'This hold no longer exists');

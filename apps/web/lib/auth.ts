@@ -130,6 +130,7 @@ export const signedInEmail = () => readSession()?.email;
 
 /** Cognito groups from the access token, for showing or hiding operator screens. The API checks them for real. */
 export function signedInGroups(): string[] {
+  if (process.env.NEXT_PUBLIC_DROPDECK_DEMO === '1') return ['operators'];
   const token = readSession()?.accessToken;
   try {
     const payload = JSON.parse(atob(token!.split('.')[1]!.replace(/-/g, '+').replace(/_/g, '/'))) as { 'cognito:groups'?: string[] };

@@ -11,6 +11,7 @@ import { listFeatured, syncFeatured } from '@dropdeck/shared/ddb';
 import { env } from './env.js';
 import type { DecodedImage } from './images.js';
 import * as repo from './repo.js';
+import { healthEvent } from '@dropdeck/shared/observability';
 
 const s3 = new S3Client({});
 const scheduler = new SchedulerClient({});
@@ -19,6 +20,7 @@ const scheduler = new SchedulerClient({});
 export { toPublicDrop } from '@dropdeck/shared';
 
 export async function writeDropJson(drop: Drop, profile: MerchantProfile | undefined): Promise<void> {
+  healthEvent('register', drop.tenantId, drop.dropId, { title: drop.title, lifecycle: drop.state, sourceVersion: drop.version });
   await s3.send(new PutObjectCommand({
     Bucket: env.bucket(),
     Key: s3Keys.dropJson(drop.tenantId, drop.dropId),
@@ -75,7 +77,9 @@ export async function refreshShop(t: string, changed: Drop): Promise<void> {
     const drops = (await repo.listDrops(t)).map((x) => (x.dropId === changed.dropId ? changed : x));
     await writeShopJson(profile, drops);
     if (profile.listed) await refreshFeatured(profile, [changed]);
+    healthEvent('publication', t, changed.dropId, { publication:'shop', succeeded:true });
   } catch (e) {
+    healthEvent('publication', t, changed.dropId, { publication:'shop', succeeded:false });
     warn('shop.json refresh failed', e, { t });
   }
 }
@@ -114,13 +118,17 @@ export function initialState(state: DropState, now = new Date()): PublicState {
 }
 
 export async function writeStateJson(drop: Drop, state: DropState): Promise<void> {
-  await s3.send(new PutObjectCommand({
+  try { await s3.send(new PutObjectCommand({
     Bucket: env.bucket(),
     Key: s3Keys.stateJson(drop.tenantId, drop.dropId),
-    Body: JSON.stringify(initialState(state)),
+    Body: JSON.stringify({ ...initialState(state), sourceVersion: drop.version }),
     ContentType: 'application/json',
     CacheControl: 'public, max-age=2',
   }));
+    healthEvent('publication', drop.tenantId, drop.dropId, { publication: 'state', succeeded: true, lifecycle: state, sourceVersion: drop.version });
+  } catch (e) {
+    healthEvent('publication', drop.tenantId, drop.dropId, { publication: 'state', succeeded: false }); throw e;
+  }
 }
 
 export async function deleteStateJson(drop: Drop): Promise<void> {

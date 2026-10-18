@@ -6,6 +6,8 @@ import {
   type MerchantProfile, type Tier, type Usage,
 } from '@dropdeck/shared';
 import { ddb, isConditionFailure, listDrops, strip, table } from '@dropdeck/shared/ddb';
+import { analytics, healthOverview, dropTelemetry } from './operations.js';
+import type { OpsRange } from '@dropdeck/shared/operations';
 
 /**
  * Operator API (/admin/*), for the people who run DropDeck itself. Same sign-in as merchants; the Cognito group
@@ -89,6 +91,12 @@ export async function handler(event: Event) {
   try {
     requireOperator(event);
     switch (event.routeKey) {
+      case 'GET /admin/analytics':
+        return json(200,await analytics(event.queryStringParameters?.month,event.queryStringParameters?.cursor));
+      case 'GET /admin/health':
+        return json(200,await healthOverview(event.queryStringParameters?.cursor));
+      case 'GET /admin/health/{tenantId}/{dropId}':
+        return json(200,await dropTelemetry(event.pathParameters?.tenantId??'',event.pathParameters?.dropId??'',(event.queryStringParameters?.range??'1h') as OpsRange));
       case 'GET /admin/tenants': {
         const month = /^\d{4}-\d{2}$/.test(event.queryStringParameters?.month ?? '') ? event.queryStringParameters!.month! : usageMonth(Date.now());
         const ids = await tenantIds();
@@ -150,4 +158,4 @@ export async function handler(event: Event) {
 }
 
 /** Routes registered in infra; keep in sync with the switch above. */
-export const ROUTES = ['GET /admin/tenants', 'PATCH /admin/tenants/{tenantId}'] as const;
+export const ROUTES = ['GET /admin/tenants', 'PATCH /admin/tenants/{tenantId}', 'GET /admin/analytics','GET /admin/health','GET /admin/health/{tenantId}/{dropId}'] as const;
