@@ -25,6 +25,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm web:build
+      - run: pnpm web:verify-production
       - name: cdk synth (no AWS credentials needed)
         working-directory: infra
         env:
@@ -70,6 +71,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm web:build
+      - run: pnpm web:verify-production
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}

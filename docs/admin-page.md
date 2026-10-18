@@ -45,7 +45,54 @@ Application 429s include lockouts and rate limits. API Gateway 429s are collecte
 
 Operational counts are diagnostic estimates. Identical batch retries are deduplicated, but overlapping rebatched events or duplicate provider notifications can overcount. Missing telemetry can indicate idle traffic or delayed ingestion. These counts are not billing input or unique-buyer counts.
 
-## Backend and AWS monitoring
+## AWS architecture and service choices
+
+The admin page combines existing merchant usage records with a separate operational read model. Browser refreshes read stored summaries; telemetry ingestion and scheduled health collection run independently of checkout.
+
+```mermaid
+flowchart LR
+    Operator[Operator browser] --> CDN[CloudFront]
+    CDN --> Web[S3 web assets]
+    Operator --> Login[Cognito sign-in]
+    Operator -->|Cognito access token| API[API Gateway]
+    API --> Admin[Admin Lambda]
+    Admin -->|Usage and subscription tiers| Main[Application DynamoDB]
+    Admin -->|Health and telemetry reads| Ops[Operations DynamoDB]
+
+    App[Ticket, claim, checkout and publication functions] --> Logs[CloudWatch Logs and metrics]
+    Logs -->|Log subscriptions| Collector[Collector Lambda]
+    Timer[EventBridge every minute] --> Collector
+    Main -->|Read-only inventory sample| Collector
+    State[S3 public state] -->|Write time and revision| Collector
+    Collector -->|Redacted summaries| Ops
+
+    SES[SES delivery events] --> Delivery[SNS delivery topic]
+    Delivery --> Queue[SQS event queue]
+    Queue --> Collector
+    Queue -->|Repeated processing failures| DLQ[Dead-letter queue]
+    Logs --> Alarms[CloudWatch alarms]
+    Alarms --> Notify[SNS alarm topic]
+```
+
+| AWS service | Role in DropDeck | Reason for using it |
+| --- | --- | --- |
+| S3 and CloudFront | Host the static UI and published shop/drop state; the collector reads public state objects from S3 | Static assets and shared state can be served through the CDN without invoking application functions for every view. S3 metadata provides publication evidence. |
+| Cognito | Managed sign-in and access tokens for merchant/admin requests | Reuses the existing authentication system. The admin backend additionally requires the `operators` group. |
+| API Gateway | Routes HTTP requests, validates Cognito tokens on admin routes and captures access logs | Provides a managed API entry point and exposes throttling that occurs before Lambda runs. |
+| Lambda | Runs the admin API and event/schedule-driven collector | Fits short request and collection tasks without maintaining servers. Telemetry processing stays separate from buyer transactions. |
+| DynamoDB | Stores merchant profiles/monthly usage and, in a separate table, operational summaries and history | Merchant/drop keys support bounded queries. Stored summaries keep dashboard refreshes from repeatedly scanning transaction records or querying logs. Operational estimates remain separate from billable usage. |
+| EventBridge | Invokes collection every minute | Checks for missing heartbeats and stale publication even during periods without buyer requests. |
+| CloudWatch | Application logs, extracted metrics, native dependency metrics, dashboards and alarms | Connects business outcomes such as publication failures with Lambda/DynamoDB failures, API throttling and latency. Stage/service dimensions limit custom-metric growth. |
+| SES | Sends checkout OTP emails and publishes provider outcomes through a configuration set | Supports actual email sending and distinguishes acceptance, delivery, delays, bounces, complaints and rejections. |
+| SNS | Routes SES events to SQS and receives alarm notifications on a separate topic | Separates event producers from consumers and lets notification destinations be configured independently. |
+| SQS and its dead-letter queue | Buffer SES events and retain repeatedly failing messages for investigation | Temporary processing failures can be retried independently of checkout. Partial-batch responses retry failed messages while preserving successfully processed work. |
+| IAM | Assigns function and AWS service permissions | The collector can read application inventory and S3 state but cannot change stock; its writes are limited to the operations table. |
+
+CloudWatch extracts metrics from structured EMF logs. Tenant, drop and request IDs remain correlation fields instead of metric dimensions because each unique dimension combination creates another metric series. Operational metrics still incur log, metric and alarm costs. See [CloudWatch cost guidance](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/cloudwatch_billing.html).
+
+SES configuration-set events follow the SNS/SQS path in the diagram. A delivery event confirms acceptance by the recipient mail server rather than inbox placement or reading. Event processing can receive duplicates; receipts suppress identical batch retries, while counts remain diagnostic estimates. See [SES event publishing](https://docs.aws.amazon.com/ses/latest/dg/event-publishing-add-event-destination-sns.html) and [Lambda partial-batch handling](https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-errorhandling.html).
+
+## Backend and monitoring configuration
 
 The admin API exposes these operator-protected routes:
 
@@ -77,6 +124,29 @@ The configured alarm thresholds are:
 | SES dead-letter queue | Any visible message |
 
 Alarms publish to the stack's `AlarmTopicArn` output. No notification recipient is configured by this implementation. Thresholds have local infrastructure-test coverage; live alarm transitions, notification delivery and workload tuning have not been validated in AWS.
+
+## Production data and preview separation
+
+Normal production builds use the deployed AWS services. Simulated data is enabled only for local demo development or an explicit review build; removing the review banner does not change that distinction.
+
+| Mode | Command and flags | Data and authentication |
+| --- | --- | --- |
+| Local demo | `pnpm dev:demo` | Browser-local merchant/buyer fixtures and generated admin metrics; demo sign-in shortcuts |
+| Explicit review export | `pnpm web:review-build` sets both `DROPDECK_DEMO=1` and `DROPDECK_REVIEW_BUILD=1` | Simulated UI packaged into `apps/web/review-out` for the separate review-site stack |
+| Normal deployment build | `pnpm web:build`, with `DROPDECK_REVIEW_BUILD` unset | Normal Cognito authentication and the backend identified by the deployed `/config.json`; exported to `apps/web/out` |
+
+`next.config.mjs` sets the browser's `NEXT_PUBLIC_DROPDECK_DEMO` flag at build time. A normal production build disables the flag even if `DROPDECK_DEMO=1` remains in the shell, provided the explicit review-build flag is unset. Preview imports and authentication shortcuts are excluded from that export. Browser preview data in `localStorage` does not populate AWS tables or replace production API responses.
+
+The application stack deploys `apps/web/out` and writes `/config.json` with the target stage's API endpoint, Cognito settings and mail mode. The separate review-site stack uses `apps/web/review-out`. `operationsEnabled=true` controls monitoring infrastructure only; it does not enable demo mode. With monitoring disabled, Operations reports that monitoring is unconfigured rather than substituting sample data.
+
+CI runs `pnpm web:verify-production` after the web build in both the checks and staging deployment jobs. The check rejects preview routes and known fixture/demo-authentication markers before the deployment step. For a manual production build, run:
+
+```sh
+env -u DROPDECK_REVIEW_BUILD DROPDECK_DEMO=0 pnpm web:build
+pnpm web:verify-production
+```
+
+Use the normal application stack and the intended account/stage configuration for a live deployment. Live OTP delivery additionally requires the verified SES sender for that account/region; the stack rejects a `prod` stage without `mailFrom`.
 
 ## Data protection and current limits
 
