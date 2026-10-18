@@ -1,5 +1,5 @@
 import type { Drop, Order, OrderStatus } from '@dropdeck/shared';
-import { trackingOf } from '@dropdeck/shared/merchant-analytics';
+import { orderMatchesStatus, trackingOf } from '@dropdeck/shared/merchant-analytics';
 
 /**
  * Post-drop numbers for the merchant, counted from orders only. Stock counters are not used: holds still open when
@@ -8,7 +8,7 @@ import { trackingOf } from '@dropdeck/shared/merchant-analytics';
 export function buildReport(drop: Drop, orders: Order[], queue: { earlyCount: number | null; lateTickets: number }) {
   const units = (pred: (o: Order) => boolean) => orders.filter(pred).reduce((n, o) => n + o.qty, 0);
   const cents = (pred: (o: Order) => boolean) => orders.filter(pred).reduce((n, o) => n + o.amountCents, 0);
-  const is = (s: OrderStatus) => (o: Order) => s==='no-show'?trackingOf(o).attendanceStatus==='no_show':s==='paid'?trackingOf(o).paymentStatus==='paid':trackingOf(o).paymentStatus==='awaiting'&&trackingOf(o).attendanceStatus!=='no_show';
+  const is = (s: OrderStatus) => (o: Order) => orderMatchesStatus(o,s);
   const stock = drop.variants.reduce((n, v) => n + v.stock, 0);
   const ordered = units(() => true);
   const times = orders.map((o) => Date.parse(o.createdAt)).sort((a, b) => a - b);
@@ -29,7 +29,7 @@ export function buildReport(drop: Drop, orders: Order[], queue: { earlyCount: nu
     secondsToSellOut: soldOutAt ? Math.round((Date.parse(soldOutAt) - Date.parse(drop.openAt)) / 1000) : null,
     byVariant: drop.variants.map((v) => ({
       id: v.id, name: v.name, stock: v.stock, priceCents: v.priceCents,
-      ordered: units((o) => o.variantId === v.id), paid: units((o) => o.variantId === v.id && o.status === 'paid'),
+      ordered: units((o) => o.variantId === v.id), paid: units((o) => o.variantId === v.id && is('paid')(o)),
     })),
     // Late tickets come from block allocation, so this overstates by up to one block per Lambda instance.
     queue: { joinedDraw: queue.earlyCount, lateTicketsAtMost: queue.lateTickets },

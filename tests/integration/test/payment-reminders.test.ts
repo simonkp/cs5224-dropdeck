@@ -41,6 +41,45 @@ describe.skipIf(!enabled)('payment reminders', () => {
     expect(sendReminder).toHaveBeenCalledOnce();
   });
 
+  it('retries transient reservation conflicts and consumes quota only once before sending', async () => {
+    const { drop, body } = await seed();
+    const originalSend = ddb.send.bind(ddb); let attempts = 0;
+    const spy = vi.spyOn(ddb, 'send').mockImplementation((async (command: { constructor: { name: string }; input: { TransactItems?: unknown[] } }) => {
+      if (command.constructor.name === 'TransactWriteCommand' && command.input.TransactItems?.length === 5 && ++attempts <= 2) throw { name: 'TransactionCanceledException', CancellationReasons: [{Code:'None'},{Code:'None'},{Code:'None'},{Code:'None'},{Code:'TransactionConflict'}] };
+      return originalSend(command as never);
+    }) as never);
+    try { expect((await sendPaymentReminders(drop.tenantId,body)).results[0]?.status).toBe('accepted'); }
+    finally { spy.mockRestore(); }
+    expect(attempts).toBe(3);expect(sendReminder).toHaveBeenCalledOnce();
+    const quota=await ddb.send(new GetCommand({TableName:table(),Key:{PK:`T#${drop.tenantId}`,SK:`PAYREM_QUOTA#${new Date().toISOString().slice(0,10)}`}}));expect(quota.Item?.n).toBe(1);
+    await sendPaymentReminders(drop.tenantId,body);expect(sendReminder).toHaveBeenCalledOnce();
+  });
+
+  it('bounds transient retries and reports not sent rather than ineligible when contention persists', async () => {
+    const { drop, body } = await seed();
+    const originalSend=ddb.send.bind(ddb);let attempts=0;
+    const spy=vi.spyOn(ddb,'send').mockImplementation((async(command:{constructor:{name:string};input:{TransactItems?:unknown[]}})=>{
+      if(command.constructor.name==='TransactWriteCommand'&&command.input.TransactItems?.length===5){attempts++;throw {name:'TransactionCanceledException',CancellationReasons:[{Code:'None'},{Code:'None'},{Code:'None'},{Code:'None'},{Code:'ThrottlingError'}]};}
+      return originalSend(command as never);
+    }) as never);
+    try {const result=await sendPaymentReminders(drop.tenantId,body);expect(result.results[0]).toMatchObject({status:'failed',message:expect.stringContaining('No email was sent')});}
+    finally {spy.mockRestore();}
+    expect(attempts).toBe(4);expect(sendReminder).not.toHaveBeenCalled();
+    expect((await reminderHistory(drop.tenantId,drop.dropId,'REMINDER0')).rows).toHaveLength(0);
+    expect((await sendPaymentReminders(drop.tenantId,{...body,requestId:'retry-contention-cleared'})).results[0]?.status).toBe('accepted');expect(sendReminder).toHaveBeenCalledOnce();
+  });
+
+  it('does not retry a failed eligibility condition or send email after a concurrent payment change',async()=>{
+    const {drop,body}=await seed();const originalSend=ddb.send.bind(ddb);let attempts=0;
+    const spy=vi.spyOn(ddb,'send').mockImplementation((async(command:{constructor:{name:string};input:{TransactItems?:unknown[]}})=>{
+      if(command.constructor.name==='TransactWriteCommand'&&command.input.TransactItems?.length===5){attempts++;throw {name:'TransactionCanceledException',CancellationReasons:[{Code:'ConditionalCheckFailed'},{Code:'None'},{Code:'None'},{Code:'None'},{Code:'None'}]};}
+      return originalSend(command as never);
+    }) as never);
+    try {expect((await sendPaymentReminders(drop.tenantId,body)).results[0]?.status).toBe('skipped');}
+    finally {spy.mockRestore();}
+    expect(attempts).toBe(1);expect(sendReminder).not.toHaveBeenCalled();
+  });
+
   it('skips orders marked paid or no-show after the list was loaded', async () => {
     const { drop, orders, body } = await seed(2);
     await updateOrderTracking(drop.tenantId, drop.dropId, orders[0]!.ref, { requestId: 'payment-recorded-1', expectedVersion: 0, patch: { paymentStatus: 'paid' } });

@@ -4,7 +4,7 @@ import { buildReport, ordersCsv } from '../../../../services/merchant-api/src/re
 import { saveSession } from '../../app/d/buyer';
 import { operatorPreview } from './operations';
 import { analyticsCapabilities } from '@dropdeck/shared/plans';
-import { summarizeSales, trackingOf } from '@dropdeck/shared/merchant-analytics';
+import { orderMatchesStatus, summarizeSales, trackingOf } from '@dropdeck/shared/merchant-analytics';
 import { reminderProblem, REMINDER_BATCH_LIMIT, REMINDER_COOLDOWN_MS, type PaymentReminder, type ReminderOrder, type ReminderResult } from '@dropdeck/shared/payment-reminders';
 
 const KEY = 'dd.preview.v2';
@@ -124,7 +124,7 @@ export function install() {
       if (method === 'POST') { const d = { ...data.drops[0]!, ...body, dropId: crypto.randomUUID(), state: 'Draft' as const }; d.variants = d.variants.map((v,i) => ({ ...v, id: v.id || `item-${i}` })); data.drops.push(d); persist(); return response(d); }
       return response(data.drops);
     }
-    if (path === '/m/overview') return response({ generatedAt: iso(Date.now()), summaries: data.drops.filter(d => (url.searchParams.get('ids') ?? '').split(',').includes(d.dropId)).map(d => { const os = data.orders.filter(o => o.dropId === d.dropId); return { dropId: d.dropId, stock: 80, reserved: os.reduce((n,o) => n+o.qty,0)+(d.state === 'Live' ? 12 : 0), orders: os.length, paidOrders: os.filter(o => o.status === 'paid').length, awaitingOrders: os.filter(o => o.status === 'confirmed').length, partial: false }; }) });
+    if (path === '/m/overview') return response({ generatedAt: iso(Date.now()), summaries: data.drops.filter(d => (url.searchParams.get('ids') ?? '').split(',').includes(d.dropId)).map(d => { const os = data.orders.filter(o => o.dropId === d.dropId); return { dropId: d.dropId, stock: 80, reserved: os.reduce((n,o) => n+o.qty,0)+(d.state === 'Live' ? 12 : 0), orders: os.length, paidOrders: os.filter(o => orderMatchesStatus(o,'paid')).length, awaitingOrders: os.filter(o => orderMatchesStatus(o,'confirmed')).length, partial: false }; }) });
     const merchantDrop = path.match(/^\/m\/drops\/([^/]+)(?:\/(.+))?$/);
     if (merchantDrop) {
       const d = data.drops.find(d => d.dropId === merchantDrop[1]); if (!d) return error('NOT_FOUND', 'Drop not found', 404);

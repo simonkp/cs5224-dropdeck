@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Drop, Order, OrderStatus } from '@dropdeck/shared';
 import { buildReport, ordersCsv } from '../src/reports.js';
+import { trackingOf } from '@dropdeck/shared/merchant-analytics';
 
 const drop = {
   dropId: 'd1', title: 'Sourdough', state: 'Closed', openAt: '2026-10-31T01:00:00.000Z', endAt: '2026-10-31T01:30:00.000Z',
@@ -28,6 +29,14 @@ describe('report', () => {
   });
   it('has no sell-out time when stock remains', () => {
     expect(buildReport(drop, orders.slice(0, 1), { earlyCount: 0, lateTickets: 0 }).soldOutAt).toBeNull();
+  });
+  it('includes paid no-shows consistently in aggregate and per-variant paid totals', () => {
+    const o=order('PAID-NOSHOW','v1',2,'no-show',1);
+    o.tracking={...trackingOf(o),paymentStatus:'paid',attendanceStatus:'no_show'};
+    const result=buildReport(drop,[o],{earlyCount:0,lateTickets:0});
+    expect(result.units).toMatchObject({paid:2,noShow:2,unpaid:0});
+    expect(result.byVariant.reduce((n,v)=>n+v.paid,0)).toBe(result.units.paid);
+    expect(result.revenueCents.paid).toBe(1800);
   });
 });
 

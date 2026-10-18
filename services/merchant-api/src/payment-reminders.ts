@@ -4,6 +4,24 @@ import { ApiError, keys, type Drop, type MerchantProfile } from '@dropdeck/share
 import { retainedOrder } from '@dropdeck/shared/order-tracking-store';
 import { paymentReminderTemplate, reminderProblem, REMINDER_BATCH_LIMIT, REMINDER_COOLDOWN_MS, type PaymentReminder, type ReminderOrder, type ReminderResult, type ReminderStatus } from '@dropdeck/shared/payment-reminders';
 import { sendReminder } from './reminder-mailer.js';
+import { setTimeout as delay } from 'node:timers/promises';
+
+const transientReasons = new Set(['TransactionConflict', 'ProvisionedThroughputExceeded', 'ThrottlingError']);
+function transientCancellation(error: unknown): boolean {
+  const e = error as { name?: string; CancellationReasons?: Array<{ Code?: string }> };
+  const reasons = e.CancellationReasons;
+  return e.name === 'TransactionCanceledException' && Boolean(reasons?.some(r => transientReasons.has(r.Code ?? '')) && reasons.every(r => r.Code === 'None' || transientReasons.has(r.Code ?? '')));
+}
+async function reserveReminder(command: TransactWriteCommand): Promise<void> {
+  // A cancelled transaction has not reserved an attempt or consumed quota. Never retry the SES send itself.
+  for (let attempt = 0; ; attempt++) {
+    try { await ddb.send(command); return; }
+    catch (e) {
+      if (!transientCancellation(e) || attempt >= 3) throw e;
+      await delay(25 * 2 ** attempt + Math.floor(Math.random() * 25));
+    }
+  }
+}
 
 export const remindersEnabled = () => process.env.MERCHANT_ANALYTICS_ENABLED === '1' && process.env.MAIL_MODE === 'ses' && Boolean(process.env.MAIL_FROM);
 const latestKey = (t: string, d: string, ref: string) => ({ PK: `T#${t}`, SK: `PAYREM#${d}#${ref}` });
@@ -50,7 +68,7 @@ export async function sendPaymentReminders(t: string, body: Record<string, unkno
       const now = Date.now(), attemptedAt = new Date(now).toISOString(), nextAllowedAt = now + REMINDER_COOLDOWN_MS;
       const attempt = { type: 'PaymentReminder', ref, requestId: id, actor: t, status: 'sending', attemptedAt, nextAllowedAt, ttl };
       try {
-        await ddb.send(new TransactWriteCommand({ TransactItems: [
+        await reserveReminder(new TransactWriteCommand({ TransactItems: [
           { ConditionCheck: { TableName: table(), Key: keys.order(t, d, ref), ConditionExpression: `attribute_exists(PK) AND ${order.version === undefined ? 'attribute_not_exists(#v)' : '#v=:v'}`, ExpressionAttributeNames: { '#v': 'version' }, ...(order.version === undefined ? {} : { ExpressionAttributeValues: { ':v': order.version } }) } },
           { ConditionCheck: { TableName: table(), Key: keys.drop(t, d), ConditionExpression: '#v=:v AND (#s=:live OR #s=:closed)', ExpressionAttributeNames: { '#v': 'version', '#s': 'state' }, ExpressionAttributeValues: { ':v': drop.version, ':live': 'Live', ':closed': 'Closed' } } },
           { Put: { TableName: table(), Item: { ...lockKey, ...attempt }, ConditionExpression: 'attribute_not_exists(PK) OR nextAllowedAt<=:now', ExpressionAttributeValues: { ':now': now } } },
@@ -60,7 +78,11 @@ export async function sendPaymentReminders(t: string, body: Record<string, unkno
       } catch (e) {
         if ((e as { name?: string }).name !== 'TransactionCanceledException') throw e;
         const replay = await ddb.send(new GetCommand({ TableName: table(), Key: receiptKey, ConsistentRead: true }));
-        return replay.Item ? result(ref, replay.Item.status as ReminderStatus) : { ref, status: 'skipped', message: 'Order changed, a reminder was recently attempted, or the shop reached its 100-attempt daily limit. Refresh before retrying.' };
+        if (replay.Item) return result(ref, replay.Item.status as ReminderStatus);
+        if (transientCancellation(e)) return { ref, status: 'failed', message: 'Temporary database contention prevented reserving this reminder. No email was sent; refresh and try again.' };
+        const reasons = (e as { CancellationReasons?: Array<{ Code?: string }> }).CancellationReasons;
+        if (reasons?.some(r => r.Code === 'ConditionalCheckFailed')) return { ref, status: 'skipped', message: 'Order changed, a reminder was recently attempted, or the shop reached its 100-attempt daily limit. Refresh before retrying.' };
+        throw e;
       }
       let status: ReminderStatus = 'accepted', messageId: string | undefined;
       try { messageId = await sendReminder(order.email, paymentReminderTemplate(profile, drop, order)); }

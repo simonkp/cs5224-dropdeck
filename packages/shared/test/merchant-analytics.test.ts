@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { analyticsCapabilities } from '../src/plans.js';
-import { salesTotals, singaporeDay, summarizeSales, trackingCsv, trackingOf } from '../src/merchant-analytics.js';
+import { orderMatchesStatus, salesTotals, singaporeDay, summarizeSales, trackingCsv, trackingOf } from '../src/merchant-analytics.js';
 import type { Order } from '../src/types.js';
 
 const order=(patch:Partial<Order>={}):Order=>({tenantId:'t',dropId:'d',ref:'r',holdId:'h',variantId:'v',variantName:'Bread',qty:2,unitPriceCents:500,amountCents:1000,name:'Buyer',email:'buyer@example.com',status:'confirmed',createdAt:'2026-10-01T16:00:00Z',...patch});
@@ -15,6 +15,13 @@ describe('merchant analytics definitions',()=>{
     expect(trackingOf(order({status:'no-show'}))).toMatchObject({paymentStatus:'unknown',fulfillmentStatus:'unknown'});
     const o=order({status:'no-show',tracking:{paymentStatus:'paid',attendanceStatus:'no_show',fulfillmentMethod:'pickup',fulfillmentStatus:'not_started'}});
     expect(salesTotals([o])).toMatchObject({paidCents:1000,noShowUnits:2,fulfillmentOpen:1});
+  });
+  it('keeps paid no-shows in both filters and excludes unknown payments from awaiting',()=>{
+    const paid=order({status:'no-show',tracking:{paymentStatus:'paid',attendanceStatus:'no_show',fulfillmentMethod:'pickup',fulfillmentStatus:'not_started'}});
+    expect(orderMatchesStatus(paid,'paid')).toBe(true);expect(orderMatchesStatus(paid,'no-show')).toBe(true);expect(orderMatchesStatus(paid,'confirmed')).toBe(false);
+    const unknown=order({tracking:{...trackingOf(order()),paymentStatus:'unknown'}});
+    expect(orderMatchesStatus(unknown,'confirmed')).toBe(false);expect(orderMatchesStatus(unknown,'paid')).toBe(false);
+    expect(orderMatchesStatus(order({status:'confirmed'}),'confirmed')).toBe(true);
   });
   it('uses Singapore order cohorts and removes advanced payloads from basic reports',()=>{
     expect(singaporeDay('2026-10-01T16:00:00Z')).toBe('2026-10-02');

@@ -8,6 +8,9 @@ import { createTable, enabled, http, liveDrop, parse, shardSold } from './harnes
 import { handler as ticket } from '../../../services/ticket/src/handler.js';
 import { handler as claim } from '../../../services/claim/src/handler.js';
 import { handler as checkout } from '../../../services/checkout/src/handler.js';
+import { overviewOrders } from '../../../services/merchant-api/src/repo.js';
+import { orderCounts } from '../../../services/merchant-api/src/overview.js';
+import { buildReport } from '../../../services/merchant-api/src/reports.js';
 
 async function seed(status:Order['status']='confirmed',count=1){
   const drop=await liveDrop();
@@ -19,6 +22,16 @@ const profile=(drop:Drop,tier:string)=>ddb.send(new PutCommand({TableName:table(
 
 describe.skipIf(!enabled)('merchant analytics and order tracking',()=>{
   beforeAll(async()=>{await createTable();process.env.MERCHANT_ANALYTICS_ENABLED='1';process.env.GROWTH_ANALYTICS_PREVIEW_ENABLED='1';});
+  it('keeps projected overview counts consistent with paid no-shows and omits private tracking fields',async()=>{
+    const {drop,order}=await seed('paid',2);
+    const paid=await updateOrderTracking(drop.tenantId,drop.dropId,order.ref,{expectedVersion:0,requestId:'paid-no-show-review',patch:{attendanceStatus:'no_show',note:'Private merchant note'}});
+    const unknown=await updateOrderTracking(drop.tenantId,drop.dropId,'ORDER0001',{expectedVersion:0,requestId:'unknown-payment-review',reason:'Payment reconciliation pending',patch:{paymentStatus:'unknown'}});
+    const page=await overviewOrders(drop.tenantId,drop.dropId);
+    expect(orderCounts(page.rows)).toMatchObject({paidOrders:1,awaitingOrders:0,orders:2});
+    expect(JSON.stringify(page.rows)).not.toMatch(/Private merchant note|buyer@example.com|"note"|"email"|"name"/);
+    const report=buildReport(drop,[paid,unknown],{earlyCount:0,lateTickets:0});
+    expect(report.units.paid).toBe(1);expect(report.byVariant[0]?.paid).toBe(report.units.paid);
+  });
   it('enforces persisted tiers, blocks spoofing and removes premium access immediately on downgrade',async()=>{
     const {drop}=await seed();const t=drop.tenantId;
     for(const tier of ['starter','event']){

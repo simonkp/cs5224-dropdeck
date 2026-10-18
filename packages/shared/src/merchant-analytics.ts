@@ -1,4 +1,4 @@
-import type { Drop, Order } from './types.js';
+import type { Drop, Order, OrderStatus } from './types.js';
 
 export type PaymentStatus = 'awaiting' | 'paid' | 'unknown';
 export type FulfillmentStatus = 'not_started' | 'ready' | 'shipped' | 'collected' | 'delivered' | 'exception' | 'unknown';
@@ -19,6 +19,11 @@ export interface OrderTracking {
 }
 export function trackingOf(order: Pick<Order, 'status' | 'tracking'>): OrderTracking {
   return order.tracking ?? { paymentStatus: order.status === 'paid' ? 'paid' : order.status === 'confirmed' ? 'awaiting' : 'unknown', fulfillmentMethod: 'unassigned', fulfillmentStatus: 'unknown', attendanceStatus: order.status === 'no-show' ? 'no_show' : 'normal' };
+}
+/** Legacy report/filter labels, interpreted using independent payment and attendance records. */
+export function orderMatchesStatus(order: Pick<Order, 'status' | 'tracking'>, status: OrderStatus): boolean {
+  const t = trackingOf(order);
+  return status === 'no-show' ? t.attendanceStatus === 'no_show' : status === 'paid' ? t.paymentStatus === 'paid' : t.paymentStatus === 'awaiting' && t.attendanceStatus !== 'no_show';
 }
 export const singaporeDay = (at: string | number) => new Date(new Date(at).getTime() + 8 * 3600_000).toISOString().slice(0, 10);
 /** A bounded worklist-page export, without buyer identity or free-text notes. */

@@ -12,6 +12,7 @@ import { cn } from '../../lib/utils';
 import { ViewHeader, type ConsoleCtx } from './shared';
 import { REMINDER_BATCH_LIMIT, reminderProblem, type ReminderOrder, type PaymentReminder } from '@dropdeck/shared/payment-reminders';
 import { PaymentReminderPanel } from './PaymentReminderPanel';
+import { analyticsFromForTab, type AnalyticsTab as Tab } from '../../lib/analytics-navigation';
 
 interface Comparison extends SalesTotals { dropId:string;title:string;stock:number;sellThrough:number|null }
 interface Report {
@@ -21,7 +22,6 @@ interface Report {
   comparisons?:Comparison[];variants?:Array<SalesTotals&{dropId:string;variantId:string;name:string;dropTitle:string;stock:number}>;insights?:string[];
   previous?:{from:string;to:string;confirmedCents:number;changePercent:number|null};
 }
-type Tab='overview'|'inventory'|'payments'|'fulfillment'|'advanced';
 const field='h-10 w-full rounded-xl border border-field bg-surface px-3 text-sm';
 const label='flex flex-col gap-1.5 text-xs font-bold text-muted';
 function download(text:string,name:string) {const href=URL.createObjectURL(new Blob([text],{type:'text/csv'}));const a=document.createElement('a');a.href=href;a.download=name;a.click();URL.revokeObjectURL(href);}
@@ -32,6 +32,7 @@ export function AnalyticsView({ctx}:{ctx:ConsoleCtx}) {
   const [data,setData]=useState<Report|null>(null);const [error,setError]=useState('');const [retry,setRetry]=useState(0);const [busy,setBusy]=useState(false);
   const [inventory,setInventory]=useState<{variants:Array<{id:string;name:string;stock:number;out:number;confirmedUnits:number;complete:boolean;available:number|null}>;partial:boolean;ordersPartial:boolean}|null>(null);
   const [inventoryError,setInventoryError]=useState(false);
+  const selectTab=(next:Tab)=>{setFrom(current=>analyticsFromForTab(current,to,next));setTab(next);};
   const query=new URLSearchParams({from,to,...(dropId?{dropId}:{}),...(tab==='advanced'?{advanced:'1'}:{})}).toString();
   useEffect(()=>{
     let active=true;
@@ -54,7 +55,7 @@ export function AnalyticsView({ctx}:{ctx:ConsoleCtx}) {
   return <>
     <ViewHeader title="Your business, in view" sub={<span className="text-sm text-muted">Sales, stock and the orders that need your attention.</span>} actions={<Button variant="outline" aria-label="Refresh analytics" onClick={()=>{setRetry(n=>n+1);void ctx.refresh();}}><RefreshCw className="size-4"/><span className="hidden sm:inline">Refresh</span></Button>}/>
     <div className="flex flex-col gap-5 px-4 pb-8 lg:px-8">
-      <div className="flex gap-1 overflow-x-auto rounded-2xl bg-sunken p-1" aria-label="Analytics sections">{tabs.map(([key,name])=><button key={key} onClick={()=>setTab(key)} aria-pressed={tab===key} className={cn('shrink-0 rounded-xl px-4 py-2.5 text-sm font-bold text-muted',tab===key&&'bg-surface text-ink shadow-sm')}>{name}</button>)}</div>
+      <div className="flex gap-1 overflow-x-auto rounded-2xl bg-sunken p-1" aria-label="Analytics sections">{tabs.map(([key,name])=><button key={key} onClick={()=>selectTab(key)} aria-pressed={tab===key} className={cn('shrink-0 rounded-xl px-4 py-2.5 text-sm font-bold text-muted',tab===key&&'bg-surface text-ink shadow-sm')}>{name}</button>)}</div>
       <div className="grid gap-3 rounded-2xl border border-line bg-surface p-4 sm:grid-cols-3">
         <label className={label}>Drop<select className={field} value={dropId} onChange={e=>setDropId(e.target.value)}><option value="">All recent drops</option>{ctx.drops?.filter(d=>d.state!=='Draft').map(d=><option key={d.dropId} value={d.dropId}>{d.title}</option>)}</select></label>
         <label className={label}>From · Singapore time<input className={field} type="date" value={from} max={to} onChange={e=>setFrom(e.target.value)}/></label>
@@ -88,7 +89,7 @@ export function AnalyticsView({ctx}:{ctx:ConsoleCtx}) {
             ['Recorded paid',price(data.totals.paidCents),'Recorded by your shop'],['Awaiting payment',price(data.totals.awaitingCents),'Ready for reconciliation'],['Average order',data.totals.orders?price(Math.round(data.totals.confirmedCents/data.totals.orders)):'—','Confirmed value / orders'],
           ].map(([title,value,sub],i)=><div key={title} className={cn('rounded-2xl border border-line bg-surface p-4',i===0&&'border-[#101114] bg-[#101114] text-white')}><p className={cn('text-xs font-bold',i===0?'text-white/65':'text-muted')}>{title}</p><p className="mt-3 font-display text-3xl font-extrabold tracking-tight">{value}</p><p className={cn('mt-2 text-xs',i===0?'text-white/65':'text-muted')}>{sub}</p></div>)}</div>
           <SalesChart days={data.days}/>
-          <div className="grid gap-3 sm:grid-cols-3">{[['Awaiting pickup / delivery',data.totals.fulfillmentOpen,'fulfillment'],['Past due',data.totals.overdue,'fulfillment'],['Unknown payment',price(data.totals.unknownCents),'payments']].map(([title,value,target])=><button key={title} onClick={()=>setTab(target as Tab)} className="flex items-center justify-between rounded-2xl border border-line bg-surface p-4 text-left"><span><span className="text-xs font-bold text-muted">{title}</span><strong className="mt-1 block text-xl">{value}</strong></span><ArrowUpRight className="size-4 text-muted"/></button>)}</div>
+          <div className="grid gap-3 sm:grid-cols-3">{[['Awaiting pickup / delivery',data.totals.fulfillmentOpen,'fulfillment'],['Past due',data.totals.overdue,'fulfillment'],['Unknown payment',price(data.totals.unknownCents),'payments']].map(([title,value,target])=><button key={title} onClick={()=>selectTab(target as Tab)} className="flex items-center justify-between rounded-2xl border border-line bg-surface p-4 text-left"><span><span className="text-xs font-bold text-muted">{title}</span><strong className="mt-1 block text-xl">{value}</strong></span><ArrowUpRight className="size-4 text-muted"/></button>)}</div>
           <p className="text-xs text-muted">{data.totals.noShowUnits} no-show units · {data.totals.fulfillmentUnknown} orders with pickup / delivery status not recorded. Confirmed value includes no-shows and is not cash received.</p>
         </>}
         {tab==='advanced'&&<>

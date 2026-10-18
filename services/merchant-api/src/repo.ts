@@ -8,6 +8,7 @@ import { env } from './env.js';
 import { shardCapacities } from './validate.js';
 import { randomUUID } from 'node:crypto';
 import { retainedOrder, updateOrderTracking } from '@dropdeck/shared/order-tracking-store';
+import { trackingOf } from '@dropdeck/shared/merchant-analytics';
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), { marshallOptions: { removeUndefinedValues: true } });
 
@@ -236,12 +237,12 @@ export async function queueCounts(drop: Drop): Promise<{ earlyCount: number | nu
 }
 
 /** One bounded, projected page for the overview: no buyer identity leaves this function. */
-export async function overviewOrders(t: string, d: string) {
+export async function overviewOrders(t: string, d: string): Promise<{rows:Array<Pick<Order,'status'|'qty'|'tracking'>>;partial:boolean}> {
   const k = keys.orderPrefix(t, d);
   const r = await ddb.send(new QueryCommand({
     TableName: env.table(), KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
     ExpressionAttributeValues: { ':pk': k.PK, ':sk': k.SKPrefix },
-    ProjectionExpression: '#s, qty', ExpressionAttributeNames: { '#s': 'status' }, Limit: 500,
+    ProjectionExpression: '#s, qty, tracking.paymentStatus, tracking.attendanceStatus', ExpressionAttributeNames: { '#s': 'status' }, Limit: 500,
   }));
-  return { rows: (r.Items ?? []).map(o => ({ status: String(o.status), qty: Number(o.qty) })), partial: Boolean(r.LastEvaluatedKey) };
+  return { rows: (r.Items ?? []).map(o => ({ status: o.status as Order['status'], qty: Number(o.qty), tracking: { ...trackingOf({status:o.status as Order['status']}), ...o.tracking } })), partial: Boolean(r.LastEvaluatedKey) };
 }
