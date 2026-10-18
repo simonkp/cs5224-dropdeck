@@ -231,7 +231,7 @@ export async function tickOnce(t: string, d: string, nowMs: number, last?: Publi
     const closed = await closeDrop(drop, nowMs);
     if (closed) log('drop closed', { t, d, reason: allGone ? 'sold out' : 'ended' });
     // Re-read: if a cancel won the race, finish the drop as Cancelled.
-    await finish(closed ? { ...drop, state: 'Closed' } : await getDrop(t, d), nowMs, soldOut);
+    await finish(closed ?? await getDrop(t, d, { consistentRead: true }), nowMs, soldOut);
     return null;
   }
 

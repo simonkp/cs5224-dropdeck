@@ -1,9 +1,9 @@
 import { gunzipSync } from 'node:zlib';
 import { randomUUID } from 'node:crypto';
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { BatchGetCommand, GetCommand, PutCommand, QueryCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { BatchGetCommand, DeleteCommand, GetCommand, PutCommand, QueryCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { ddb, getDrop, table } from '@dropdeck/shared/ddb';
-import { keys, s3Keys, type Drop, type PublicState } from '@dropdeck/shared';
+import { ApiError, keys, s3Keys, type Drop, type PublicState } from '@dropdeck/shared';
 import { healthIssues, type DropHealth } from '@dropdeck/shared/operations';
 import { batches, observation, edgeObservation, sesObservation, type Observation } from './events.js';
 import { healthEvent } from '@dropdeck/shared/observability';
@@ -11,6 +11,20 @@ import { healthEvent } from '@dropdeck/shared/observability';
 const s3 = new S3Client({});
 const opsTable = () => { if (!process.env.OPS_TABLE_NAME) throw new Error('OPS_TABLE_NAME missing'); return process.env.OPS_TABLE_NAME; };
 const registryKey = (t: string, d: string) => ({ PK: 'REGISTRY', SK: `${t}/${d}` });
+
+/** A delayed sample must not delete a newer registration from a concurrent reschedule. */
+async function retire(row: Record<string, unknown>) {
+  try {
+    await ddb.send(new DeleteCommand({
+      TableName: opsTable(), Key: registryKey(String(row.tenantId), String(row.dropId)),
+      ConditionExpression: row.sourceVersionClock === undefined ? 'attribute_not_exists(#clock)' : '#clock = :clock',
+      ExpressionAttributeNames: { '#clock': 'sourceVersionClock' },
+      ...(row.sourceVersionClock === undefined ? {} : { ExpressionAttributeValues: { ':clock': row.sourceVersionClock } }),
+    }));
+  } catch (e) {
+    if ((e as { name?: string }).name !== 'ConditionalCheckFailedException') throw e;
+  }
+}
 
 /** Metrics are diagnostic estimates, never billing input. Group retries are deduplicated transactionally. */
 export async function ingest(events: Observation[], source: string) {
@@ -88,14 +102,25 @@ export async function collect() {
     if((e as {name?:string}).name==='ConditionalCheckFailedException') return {sampled:0,failures:0,more:false,skipped:true};
     throw e;
   }
-  const cursor = await ddb.send(new GetCommand({ TableName: opsTable(), Key: { PK:'META',SK:'COLLECTOR' } }));
+  const cursor = await ddb.send(new GetCommand({ TableName: opsTable(), Key: { PK:'META',SK:'COLLECTOR' }, ConsistentRead: true }));
   const page = await ddb.send(new QueryCommand({ TableName: opsTable(), KeyConditionExpression: 'PK = :pk',
     ExpressionAttributeValues: { ':pk':'REGISTRY' }, Limit:20, ExclusiveStartKey: cursor.Item?.cursor??undefined }));
   let failures = 0; let unhealthy = 0;
   const rows = (page.Items ?? []).filter(r => !r.ttl || r.ttl > now/1000);
   for (let i=0;i<rows.length;i+=4) await Promise.all(rows.slice(i,i+4).map(async row => {
     try {
-      const drop = await getDrop(String(row.tenantId),String(row.dropId));
+      let drop: Drop;
+      try {
+        drop = await getDrop(String(row.tenantId),String(row.dropId), { consistentRead: true });
+      } catch (e) {
+        if (!(e instanceof ApiError) || e.code !== 'NOT_FOUND') throw e;
+        await retire(row);
+        return;
+      }
+      if (drop.state === 'Draft') {
+        await retire(row);
+        return;
+      }
       const inv = await inventory(drop,now);
       let publicState: PublicState | undefined; let publicLastModifiedAt: number | undefined;
       try {
@@ -112,20 +137,30 @@ export async function collect() {
       const severity = issues.length ? (issues.some(s=>/heartbeat|failed|differs from database/.test(s)) ? 'critical':'warning') : 'healthy';
       if (issues.length) unhealthy++;
       // Only update collector-owned fields. Never replace heartbeats arriving during this sample.
-      const publicFields = { publicState:health.publicState??'Unavailable',publicVersion:health.publicVersion??null, publicLastModifiedAt:publicLastModifiedAt??null };
+      const publicFields = { publicState:health.publicState??null,publicVersion:health.publicVersion??null, publicLastModifiedAt:publicLastModifiedAt??null };
+      const ttl = Math.floor(Date.parse(drop.endAt)/1000)+2*86400;
       await ddb.send(new UpdateCommand({ TableName:opsTable(),Key:registryKey(drop.tenantId,drop.dropId),
-        UpdateExpression:'SET title=:title, lifecycle=:life, observedAt=:now, inventory=:inv, sourceVersion=:version, publicSnapshot=:public, issues=:issues, severity=:severity, #ttl=:ttl',
+        UpdateExpression:'SET title=:title, lifecycle=:life, observedAt=:now, inventory=:inv, sourceVersion=:version, publicSnapshot=:public, issues=:issues, severity=:severity, #ttl=:ttl'
+          + (issues.length ? ', GSI1PK=:open, GSI1SK=:expires' : ' REMOVE GSI1PK, GSI1SK'),
         ExpressionAttributeNames:{ '#ttl':'ttl' }, ExpressionAttributeValues:{ ':title':drop.title, ':life':drop.state, ':now':now, ':inv':inv, ':version':drop.version,
-          ':public':publicFields, ':issues':issues, ':severity':severity, ':ttl':Math.floor(Date.parse(drop.endAt)/1000)+2*86400 } }));
+          ':public':publicFields, ':issues':issues, ':severity':severity, ':ttl':ttl,
+          ...(issues.length ? { ':open':'UNRESOLVED', ':expires':`${String(ttl*1000).padStart(13,'0')}#${drop.tenantId}/${drop.dropId}` } : {}) } }));
       if (JSON.stringify(row.issues??[]) !== JSON.stringify(issues)) await ddb.send(new PutCommand({ TableName:opsTable(),Item:{ PK:`DROP#${drop.tenantId}/${drop.dropId}`,SK:`INCIDENT#${now}`,at:now,issues,severity,ttl:Math.floor(now/1000)+30*86400 } }));
     } catch { failures++; console.error(JSON.stringify({ level:'error',msg:'ops collection failed',tenantId:row.tenantId,dropId:row.dropId })); }
   }));
+  // Sparse expiry-ordered index: keep an incident visible between visits to its collection page.
+  // A single matching key proves presence; no unbounded scan or per-drop CloudWatch metric is needed.
+  const unresolved = await ddb.send(new QueryCommand({
+    TableName:opsTable(), IndexName:'GSI1', KeyConditionExpression:'GSI1PK = :open AND GSI1SK >= :now',
+    ExpressionAttributeValues:{ ':open':'UNRESOLVED', ':now':String(now+1).padStart(13,'0') }, Limit:1, Select:'COUNT',
+  }));
+  const unresolvedIncidentPresent = Number((unresolved.Count??0)>0);
   await ddb.send(new UpdateCommand({TableName:opsTable(),Key:collectorKey,
     UpdateExpression:'SET #at=:now, #count=:count, failures=:failures, #cursor=:cursor REMOVE leaseOwner, leaseUntil',
     ConditionExpression:'leaseOwner=:owner',ExpressionAttributeNames:{'#at':'at','#count':'count','#cursor':'cursor'},
     ExpressionAttributeValues:{':now':now,':count':rows.length,':failures':failures,':cursor':page.LastEvaluatedKey??null,':owner':owner}}));
-  process.stdout.write(JSON.stringify({ _aws:{ Timestamp:now,CloudWatchMetrics:[{ Namespace:'DropDeck/Operations',Dimensions:[['Stage']],Metrics:[{Name:'CollectionErrors',Unit:'Count'},{Name:'AffectedDrops',Unit:'Count'},{Name:'CollectionRuns',Unit:'Count'}] }] }, Stage:process.env.STAGE,CollectionErrors:failures,AffectedDrops:unhealthy,CollectionRuns:1 })+'\n');
-  return { sampled:rows.length,failures,more:Boolean(page.LastEvaluatedKey) };
+  process.stdout.write(JSON.stringify({ _aws:{ Timestamp:now,CloudWatchMetrics:[{ Namespace:'DropDeck/Operations',Dimensions:[['Stage']],Metrics:[{Name:'CollectionErrors',Unit:'Count'},{Name:'AffectedDrops',Unit:'Count'},{Name:'UnresolvedIncidentPresent',Unit:'Count'},{Name:'CollectionRuns',Unit:'Count'}] }] }, Stage:process.env.STAGE,CollectionErrors:failures,AffectedDrops:unhealthy,UnresolvedIncidentPresent:unresolvedIncidentPresent,CollectionRuns:1 })+'\n');
+  return { sampled:rows.length,failures,more:Boolean(page.LastEvaluatedKey),unresolvedIncidentPresent };
 }
 
 type LogInput = { awslogs: { data: string } };

@@ -9,6 +9,7 @@ vi.mock('@aws-sdk/client-s3',()=>({
 const {ingest,collect}=await import('../../../services/operations/src/handler.js');
 const {observation}=await import('../../../services/operations/src/events.js');
 const {analytics,dropTelemetry,healthOverview}=await import('../../../services/admin-api/src/operations.js');
+const {handler:admin}=await import('../../../services/admin-api/src/handler.js');
 const {handler:ticket}=await import('../../../services/ticket/src/handler.js');
 const {handler:claim}=await import('../../../services/claim/src/handler.js');
 const {ddb,table}=await import('@dropdeck/shared/ddb');
@@ -36,10 +37,15 @@ describe.skipIf(!enabled)('operations against DynamoDB Local',()=>{
   it('keeps analytics page-scoped across real DynamoDB pagination',async()=>{
     const rows=Array.from({length:26},(_,i)=>{const t=`analytics-${String(i).padStart(2,'0')}`;return [
       {PK:'TENANTS',SK:`T#${t}`,tenantId:t}, {PK:`T#${t}`,SK:'PROFILE',tenantId:t,name:t,tier:'growth'},
-      {PK:`T#${t}`,SK:'USAGE#2026-10',month:'2026-10',sessions:i+1,drops:1,orders:1,revenueCents:800},
+      {PK:`T#${t}`,SK:'USAGE#2026-10',month:'2026-10',sessions:i+1,drops:1,cancelled:0,orders:1,revenueCents:800},
     ];}).flat();
     for(let i=0;i<rows.length;i+=25)await ddb.send(new BatchWriteCommand({RequestItems:{[table()]:rows.slice(i,i+25).map(Item=>({PutRequest:{Item}}))}}));
     const first=await analytics('2026-10');expect(first.scope).toBe('page');expect(first.shops).toBe(25);expect(first.partial).toBe(false);expect(first.trend.at(-1)?.sessions).toBe(325);expect(first.nextCursor).toBeTruthy();
     const next=await analytics('2026-10',first.nextCursor);expect(next.shops).toBe(1);expect(next.trend.at(-1)?.sessions).toBe(26);expect(next.nextCursor).toBeUndefined();
+    const changed=await admin({routeKey:'PATCH /admin/tenants/{tenantId}',pathParameters:{tenantId:'analytics-00'},body:JSON.stringify({tier:'event'}),requestContext:{authorizer:{jwt:{claims:{sub:'operator','cognito:groups':['operators']}}}}} as never);
+    expect(changed.statusCode).toBe(200);
+    const refreshed=await analytics('2026-10');
+    expect(refreshed.planMix.find(p=>p.tier==='event')?.shops).toBe(1);
+    expect(refreshed.merchants.find(m=>m.tenantId==='analytics-00')).toMatchObject({tier:'event',previewSgd:19});
   });
 });

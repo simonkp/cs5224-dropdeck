@@ -98,6 +98,7 @@ function Dashboard() {
   const [month, setMonth] = useState(thisMonth);
   const [data, setData] = useState<Overview | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
+  const [analyticsRevision, setAnalyticsRevision] = useState(0);
 
   const load = useCallback(async () => {
     try {
@@ -113,6 +114,7 @@ function Dashboard() {
     setSaving(row.tenantId);
     try {
       await api(`/admin/tenants/${encodeURIComponent(row.tenantId)}`, { method: 'PATCH', body: { tier } });
+      setAnalyticsRevision((revision) => revision + 1);
       toast.success(`${row.name} is now on ${PLANS[tier].label}`);
       await load();
     } catch (e) {
@@ -148,7 +150,7 @@ function Dashboard() {
         )) : Array.from({ length: 7 }, (_, i) => <Skeleton key={i} className="h-[76px]" />)}
       </div>
       <p className="text-[13px] text-muted">Usage is counted when each drop finishes. Billable is a preview from the plans (decision 0007); no payment is taken.</p>
-      <BusinessAnalytics month={month}/>
+      <BusinessAnalytics month={month} refreshVersion={analyticsRevision}/>
 
       {data && data.tenants.length === 0 && <Card><p className="text-sm text-muted">No shops yet.</p></Card>}
       {data && data.tenants.length > 0 && (

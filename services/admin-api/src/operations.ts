@@ -30,7 +30,7 @@ export async function analytics(month=usageMonth(Date.now()), after?: string) {
   for(let i=0;i<wanted.length;i+=100) {
     let pending=wanted.slice(i,i+100);
     for(let attempt=0;pending.length && attempt<3;attempt++) {
-      const r=await ddb.send(new BatchGetCommand({RequestItems:{[table()]:{Keys:pending}}}));
+      const r=await ddb.send(new BatchGetCommand({RequestItems:{[table()]:{Keys:pending,ConsistentRead:true}}}));
       items.push(...r.Responses?.[table()]??[]);
       pending=(r.UnprocessedKeys?.[table()]?.Keys??[]) as typeof pending;
       if(pending.length && attempt<2) await new Promise(resolve=>setTimeout(resolve,25*2**attempt));

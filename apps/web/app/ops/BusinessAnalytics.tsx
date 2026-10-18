@@ -11,7 +11,7 @@ interface Analytics {
   trend:Array<{month:string;sessions:number;orders:number;drops:number}>;
   merchants:Array<{tenantId:string;name:string;tier:Tier;sessions:number;drops:number;previewSgd:number}>;
 }
-export function BusinessAnalytics({month}:{month:string}) {
+export function BusinessAnalytics({month,refreshVersion=0}:{month:string;refreshVersion?:number}) {
   const [data,setData]=useState<Analytics|null>(null);const [cursor,setCursor]=useState<string>();const [previous,setPrevious]=useState<Array<string|undefined>>([]);
   const [error,setError]=useState(false);const [retry,setRetry]=useState(0);
   useEffect(()=>{setCursor(undefined);setPrevious([]);},[month]);
@@ -19,7 +19,7 @@ export function BusinessAnalytics({month}:{month:string}) {
     let active=true;setData(null);setError(false);
     api<Analytics>(`/admin/analytics?month=${month}${cursor?`&cursor=${encodeURIComponent(cursor)}`:''}`).then(r=>{if(active)setData(r);}).catch(()=>{if(active)setError(true);});
     return()=>{active=false;};
-  },[month,cursor,retry]);
+  },[month,cursor,retry,refreshVersion]);
   if(error) return <Card><p role="status">Business analytics could not load. <Button variant="outline" size="sm" onClick={()=>setRetry(n=>n+1)}>Retry</Button></p></Card>;
   if(!data) return <Card><p className="text-sm text-muted">Loading business analytics…</p></Card>;
   const max=Math.max(1,...data.trend.map(r=>r.sessions));

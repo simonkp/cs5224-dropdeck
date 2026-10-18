@@ -103,11 +103,12 @@ describe('PATCH a scheduled drop', () => {
     expect(repo.saveDrop).not.toHaveBeenCalled();
   });
 
-  it('allows text edits and republishes drop.json', async () => {
-    repo.saveDrop.mockImplementation(async (d) => d);
+  it('republishes metadata and state with the saved revision after text edits', async () => {
+    repo.saveDrop.mockImplementation(async (d) => ({ ...d, version: d.version + 1 }));
     const r = await call('PATCH /m/drops/{dropId}', { title: 'Weekend sourdough' });
     expect(r.statusCode).toBe(200);
     expect(pub.writeDropJson).toHaveBeenCalled();
+    expect(pub.writeStateJson).toHaveBeenCalledWith(expect.objectContaining({ title: 'Weekend sourdough', version: 2 }), 'Scheduled');
   });
 
   it('rejects an end time moved before the open', async () => {

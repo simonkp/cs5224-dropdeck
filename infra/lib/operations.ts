@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { Duration, RemovalPolicy, CfnOutput, Stack } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
-import { AttributeType, Billing, TableV2, Operation } from 'aws-cdk-lib/aws-dynamodb';
+import { AttributeType, Billing, TableV2, Operation, ProjectionType } from 'aws-cdk-lib/aws-dynamodb';
 import { Architecture, Runtime } from 'aws-cdk-lib/aws-lambda';
 import { NodejsFunction, OutputFormat } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
@@ -23,7 +23,8 @@ export class Operations extends Construct {
   constructor(scope:Construct,id:string,props:{stage:string;repoRoot:string;table:TableV2;bucket:Bucket;apiId:string;apiStage:CfnStage;producers:NodejsFunction[];admin:NodejsFunction;checkout:NodejsFunction;mailFrom?:string}) {
     super(scope,id);
     const {stage}=props;
-    const snapshots=new TableV2(this,'Snapshots',{partitionKey:{name:'PK',type:AttributeType.STRING},sortKey:{name:'SK',type:AttributeType.STRING},billing:Billing.onDemand(),timeToLiveAttribute:'ttl',removalPolicy:RemovalPolicy.RETAIN});
+    const snapshots=new TableV2(this,'Snapshots',{partitionKey:{name:'PK',type:AttributeType.STRING},sortKey:{name:'SK',type:AttributeType.STRING},billing:Billing.onDemand(),timeToLiveAttribute:'ttl',removalPolicy:RemovalPolicy.RETAIN,
+      globalSecondaryIndexes:[{indexName:'GSI1',partitionKey:{name:'GSI1PK',type:AttributeType.STRING},sortKey:{name:'GSI1SK',type:AttributeType.STRING},projectionType:ProjectionType.KEYS_ONLY}]});
     const logs=new LogGroup(this,'CollectorLogs',{retention:RetentionDays.ONE_MONTH,removalPolicy:RemovalPolicy.DESTROY});
     const collector=new NodejsFunction(this,'Collector',{entry:path.join(props.repoRoot,'services/operations/src/handler.ts'),projectRoot:props.repoRoot,runtime:Runtime.NODEJS_22_X,architecture:Architecture.ARM_64,memorySize:512,timeout:Duration.seconds(60),logGroup:logs,
       environment:{TABLE_NAME:props.table.tableName,OPS_TABLE_NAME:snapshots.tableName,BUCKET_NAME:props.bucket.bucketName,STAGE:stage,OPS_ENABLED:'1'},
@@ -68,10 +69,12 @@ export class Operations extends Construct {
     addAlarm('EdgeThrottleRate',new MathExpression({expression:'IF((requests>=50) AND (throttles>=20),100*throttles/requests,0)',usingMetrics:{requests:apiCount,throttles:stageMetric('ApiGateway429').with({period:Duration.minutes(5)})},period:Duration.minutes(5)}),5);
     addAlarm('CollectionFailures',stageMetric('CollectionErrors'),0);
     for(const name of ['PublicationFailures','OtpSendFailures','OtpDeliveryDelays','OtpBounces','OtpComplaints','OtpRejected']) addAlarm(name,stageMetric(name),0,1);
-    addAlarm('AffectedDrops',stageMetric('AffectedDrops'),0,3);
+    const unresolvedPresence=stageMetric('UnresolvedIncidentPresent').with({statistic:'Maximum'});
+    addAlarm('AffectedDrops',unresolvedPresence,0,3);
     // A silent scheduled collector must not appear healthy merely because it emits no errors.
     new Alarm(this,'CollectionMissing',{metric:stageMetric('CollectionRuns'),threshold:1,evaluationPeriods:3,comparisonOperator:ComparisonOperator.LESS_THAN_THRESHOLD,treatMissingData:TreatMissingData.BREACHING}).addAlarmAction(new SnsAction(notifications));
     dashboard.addWidgets(new GraphWidget({title:'API edge throttles (not OTP lockouts)',left:[stageMetric('ApiGateway429')],width:12}),new GraphWidget({title:'Affected drops in collector sample / collection failures',left:[stageMetric('AffectedDrops'),stageMetric('CollectionErrors')],width:12}));
+    dashboard.addWidgets(new GraphWidget({title:'Unresolved detected incident present (0 or 1)',left:[unresolvedPresence],width:12}));
     dashboard.addWidgets(new GraphWidget({title:'OTP provider outcomes (not inbox confirmation)',left:[stageMetric('OtpAccepted'),stageMetric('OtpDelivered'),stageMetric('OtpSendFailures'),stageMetric('OtpDeliveryDelays')],width:12}),new GraphWidget({title:'Publication failures',left:[stageMetric('PublicationFailures')],width:12}));
     const dlq=new Queue(this,'DeliveryDLQ',{encryption:QueueEncryption.SQS_MANAGED,retentionPeriod:Duration.days(14)});
     const deliveryQueue=new Queue(this,'DeliveryEvents',{encryption:QueueEncryption.SQS_MANAGED,retentionPeriod:Duration.days(4),visibilityTimeout:Duration.minutes(6),deadLetterQueue:{queue:dlq,maxReceiveCount:3}});

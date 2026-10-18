@@ -30,6 +30,8 @@ describe('read-only operations infrastructure',()=>{
     expect(JSON.stringify(template.findResources('AWS::CloudWatch::Alarm'))).toMatch(/ThrottledRequests/);
     expect(JSON.stringify(template.findResources('AWS::IAM::Policy'))).toMatch(/configuration-set/);
     template.hasResourceProperties('AWS::CloudWatch::Alarm',{TreatMissingData:'breaching',ComparisonOperator:'LessThanThreshold',MetricName:'CollectionRuns'});
+    template.hasResourceProperties('AWS::CloudWatch::Alarm',{MetricName:'UnresolvedIncidentPresent',Statistic:'Maximum',EvaluationPeriods:3,DatapointsToAlarm:3});
+    template.hasResourceProperties('AWS::DynamoDB::GlobalTable',{GlobalSecondaryIndexes:Match.arrayWith([Match.objectLike({IndexName:'GSI1',Projection:{ProjectionType:'KEYS_ONLY'}})])});
     const subscriptions=Object.values(template.findResources('AWS::SNS::Subscription')) as Array<{Properties:{Protocol:string}}>;
     expect(subscriptions.every(s=>s.Properties.Protocol==='sqs')).toBe(true);
   });

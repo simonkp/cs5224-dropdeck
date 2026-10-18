@@ -6,7 +6,7 @@ The implementation is available on `feat/ops-health-recovery` and has been valid
 
 ## Shops & billing
 
-The month selector controls the existing shop totals and billing overview. Operators can view merchant identities, change their subscription tier, and inspect drops, buyer sessions, orders, sales and bill previews. The available tiers are Starter, Growth and Event.
+The month selector controls the existing shop totals and billing overview. Operators can view merchant identities, change their subscription tier, and inspect drops, buyer sessions, orders, sales and bill previews. The available tiers are Starter, Growth and Event. Saving a tier change refreshes both the shop overview and business analytics; analytics read committed profile/usage values.
 
 Business analytics add:
 
@@ -106,7 +106,9 @@ The admin API exposes these operator-protected routes:
 
 When enabled, monitoring provisions a separate operations DynamoDB table, a collector Lambda, a minute EventBridge rule, application/API log subscriptions, CloudWatch metrics/dashboard/alarms, an SNS alarm topic, and an encrypted SES delivery-event queue with a dead-letter queue. Configuring `mailFrom` also adds an SES configuration set and SNS delivery routing. SES configuration and sender verification are specific to the AWS account and region.
 
-Drop publications and controller heartbeats register drops automatically. Historical drops appear after their next publication or controller activity. The collector samples at most 20 registry records per invocation with four parallel reads and a 90-second lease; larger registries take multiple cycles. It has read-only access to the application table and S3 state objects, and writes only to the operations table. Request handlers emit telemetry without synchronous monitoring network calls. CloudWatch metric dimensions use stage/service, keeping tenant and drop IDs as correlation fields.
+Drop publications and controller heartbeats register drops automatically. Historical drops appear after their next publication or controller activity. Unscheduled drafts and confirmed deleted drops are retired from the registry using a consistent application read and a conditional delete that preserves newer registrations. The collector samples at most 20 registry records per invocation with four parallel reads and a 90-second lease; larger registries take multiple cycles. It has read-only access to the application table and S3 state objects, and writes only to the operations table. Request handlers emit telemetry without synchronous monitoring network calls. CloudWatch metric dimensions use stage/service, keeping tenant and drop IDs as correlation fields.
+
+A sparse, expiry-ordered index retains unresolved health issues between visits to their collection page. Each minute the collector publishes `UnresolvedIncidentPresent` as 0 or 1 from a bounded index query. A healthy page cannot clear an issue on another page; a healthy recheck or registry retirement removes it, and expired evidence is excluded. Index reads are eventually consistent. `AffectedDrops` remains the count in the latest collection sample.
 
 The configured alarm thresholds are:
 
@@ -118,7 +120,7 @@ The configured alarm thresholds are:
 | Lambda errors/throttles and DynamoDB throttling/system errors | Nonzero for two consecutive 5-minute periods |
 | Collection failures | Nonzero for two consecutive minute periods |
 | Missing collector | Fewer than one run per minute for three periods; missing data breaches |
-| Affected drops in the collection sample | Nonzero for three consecutive minute periods |
+| Unresolved detected incident present | Nonzero for three consecutive minute periods, using Maximum per minute across collection pages |
 | Publication failure or OTP send failure/delay/bounce/complaint/rejection | Nonzero in one minute period |
 | SES queue backlog | Oldest message >120 seconds for two consecutive minute periods |
 | SES dead-letter queue | Any visible message |

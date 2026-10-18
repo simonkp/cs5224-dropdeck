@@ -135,6 +135,7 @@ export async function handler(event: Event) {
         const next = await repo.saveDrop(merged, current.version);
         if (next.state === 'Scheduled') {
           await pub.writeDropJson(next, await repo.getProfile(t));
+          await pub.writeStateJson(next, 'Scheduled');
           await pub.refreshShop(t, next);
         }
         return json(200, next);
