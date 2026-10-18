@@ -1,5 +1,6 @@
 import { SendEmailCommand, SESv2Client } from '@aws-sdk/client-sesv2';
 import { ssmSecret } from '@dropdeck/shared/secrets';
+import { healthEvent } from '@dropdeck/shared/observability';
 
 /**
  * One interface, several senders (decision 0002). MAIL_MODE:
@@ -8,6 +9,8 @@ import { ssmSecret } from '@dropdeck/shared/secrets';
  *        it on prod. It is the default until a domain is verified in SES.
  */
 export interface Mail {
+  tenantId?: string;
+  dropId?: string;
   to: string;
   subject: string;
   text: string;
@@ -22,11 +25,14 @@ async function viaSes(m: Mail): Promise<void> {
   const from = process.env.MAIL_FROM;
   if (!from) throw new Error('MAIL_FROM is not set');
   ses ??= new SESv2Client({});
-  await ses.send(new SendEmailCommand({
+  const result = await ses.send(new SendEmailCommand({
     FromEmailAddress: from,
+    ...(process.env.SES_CONFIG_SET ? { ConfigurationSetName: process.env.SES_CONFIG_SET,
+      EmailTags: m.tenantId && m.dropId ? [{ Name:'dd-tenant',Value:m.tenantId },{ Name:'dd-drop',Value:m.dropId }] : undefined } : {}),
     Destination: { ToAddresses: [m.to] },
     Content: { Simple: { Subject: { Data: m.subject }, Body: { Text: { Data: m.text } } } },
   }));
+  if(m.tenantId && m.dropId) healthEvent('otpAccepted',m.tenantId,m.dropId,{mailMode:'ses',messageId:result.MessageId});
 }
 
 async function viaResend(m: Mail): Promise<void> {
@@ -40,6 +46,7 @@ async function viaResend(m: Mail): Promise<void> {
 
 export async function sendMail(m: Mail): Promise<void> {
   if (mailMode() === 'log') {
+    if(m.tenantId && m.dropId) healthEvent('otpTestMode',m.tenantId,m.dropId,{mailMode:'log'});
     // Masked: in a study on a log-mode stage, participants' addresses should not sit in CloudWatch.
     console.log(JSON.stringify({ level: 'info', msg: 'mail (log mode, not sent)', to: m.to.replace(/^(.)[^@]*(.@)/, '$1•••$2') }));
     return;
@@ -47,8 +54,10 @@ export async function sendMail(m: Mail): Promise<void> {
   try {
     await viaSes(m);
   } catch (e) {
+    if(m.tenantId && m.dropId) healthEvent('otpFailed',m.tenantId,m.dropId,{mailMode:'ses'});
     if (!process.env.RESEND_KEY_PARAM) throw e;
     console.error(JSON.stringify({ level: 'error', msg: 'SES send failed; trying Resend', err: String(e) }));
     await viaResend(m);
+    if(m.tenantId && m.dropId) healthEvent('otpFallback',m.tenantId,m.dropId,{mailMode:'ses'});
   }
 }

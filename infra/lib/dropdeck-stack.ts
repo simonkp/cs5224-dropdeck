@@ -27,6 +27,7 @@ import { StringParameter } from 'aws-cdk-lib/aws-ssm';
 import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { EmailIdentity, Identity } from 'aws-cdk-lib/aws-ses';
 import type { Construct } from 'constructs';
+import { Operations } from './operations.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -61,6 +62,8 @@ function loginBranding(): Pick<CfnManagedLoginBranding, 'settings' | 'assets' | 
 }
 
 export interface DropDeckStackProps extends StackProps {
+  /** Opt-in per stage after reviewing monitoring cost and notification configuration. */
+  operationsEnabled?: boolean;
   stage: string;
   budgetUsd: number;
   budgetEmail: string;
@@ -400,6 +403,9 @@ export class DropDeckStack extends Stack {
     const adminIntegration = new HttpLambdaIntegration('AdminInt', adminFn);
     api.addRoutes({ path: '/admin/tenants', methods: [HttpMethod.GET], integration: adminIntegration, authorizer });
     api.addRoutes({ path: '/admin/tenants/{tenantId}', methods: [HttpMethod.PATCH], integration: adminIntegration, authorizer });
+    for(const path of ['/admin/analytics','/admin/health','/admin/health/{tenantId}/{dropId}']) api.addRoutes({path,methods:[HttpMethod.GET],integration:adminIntegration,authorizer});
+    if(props.operationsEnabled) new Operations(this,'Operations',{stage,repoRoot,table,bucket,apiId:api.apiId,apiStage:cfnStage,
+      producers:[ticketFn,claimFn,checkoutFn,controllerFn,merchantFn],admin:adminFn,checkout:checkoutFn,mailFrom:props.mailFrom});
     const ticketRoutes = api.addRoutes({ path: '/api/d/{tenantId}/{dropId}/ticket', methods: [HttpMethod.POST], integration: new HttpLambdaIntegration('TicketInt', ticketFn) });
     // The stage's per-route throttles name these routes, so they must exist before the stage is updated.
     for (const r of ticketRoutes) cfnStage.node.addDependency(r);

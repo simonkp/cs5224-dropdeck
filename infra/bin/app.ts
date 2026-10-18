@@ -32,6 +32,7 @@ const stack = review ? new ReviewSiteStack(app, 'DropDeck-UiReview', { env, redi
   webOrigins: (app.node.tryGetContext('webOrigins') as string[] | undefined) ?? [],
   ticketBlockSize: Number(app.node.tryGetContext('ticketBlockSize') ?? 10),
   mailFrom: setting('mailFrom'),
+  operationsEnabled: setting('operationsEnabled') === 'true',
   resendFallback: setting('resendFallback') === 'true',
   domainName: setting('domainName'),
   certificateArn: setting('certificateArn'),

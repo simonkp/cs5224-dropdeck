@@ -30,8 +30,9 @@ export function strip<T>(item: Record<string, unknown> | undefined): T | undefin
   return rest as T;
 }
 
-export async function getDrop(t: string, d: string): Promise<Drop> {
-  const r = await ddb.send(new GetCommand({ TableName: table(), Key: keys.drop(t, d) }));
+export async function getDrop(t: string, d: string, options: { consistentRead?: boolean } = {}): Promise<Drop> {
+  const r = await ddb.send(new GetCommand({ TableName: table(), Key: keys.drop(t, d),
+    ...(options.consistentRead ? { ConsistentRead: true } : {}) }));
   const drop = strip<Drop>(r.Item);
   if (!drop) throw new ApiError('NOT_FOUND', 'Drop not found');
   return drop;

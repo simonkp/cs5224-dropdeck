@@ -8,6 +8,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./secrets": "./src/secrets.ts",
+    "./observability": "./src/observability.ts",
+    "./operations": "./src/operations.ts",
     "./ddb": "./src/ddb.ts",
     "./branding": "./src/branding.ts",
     "./plans": "./src/plans.ts",

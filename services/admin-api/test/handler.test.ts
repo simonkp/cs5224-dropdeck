@@ -15,8 +15,8 @@ describe('operator check', () => {
   });
 
   it('refuses anyone outside the operators group, before touching data', async () => {
-    for (const g of [undefined, '[merchants]', '[operatorsx]']) {
-      const r = await handler(ev(g));
+    for (const g of [undefined, '[merchants]', '[operatorsx]']) for(const route of ['GET /admin/tenants','GET /admin/analytics','GET /admin/health','GET /admin/health/{tenantId}/{dropId}']) {
+      const r = await handler({...ev(g) as object,routeKey:route} as never);
       expect(r.statusCode, String(g)).toBe(403);
       expect(JSON.parse(r.body).code).toBe('FORBIDDEN');
     }

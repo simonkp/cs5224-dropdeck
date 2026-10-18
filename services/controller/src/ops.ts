@@ -52,19 +52,20 @@ export function soldOutFlags(drop: Drop, sold: Record<string, number>): Record<s
 }
 
 /** Live → Closed. Conditional, so overlapping controllers (or a merchant cancel) cannot both win. */
-export async function closeDrop(drop: Drop, nowMs: number): Promise<boolean> {
+export async function closeDrop(drop: Drop, nowMs: number): Promise<Drop | undefined> {
   try {
-    await ddb.send(new UpdateCommand({
+    const result = await ddb.send(new UpdateCommand({
       TableName: table(),
       Key: keys.drop(drop.tenantId, drop.dropId),
       UpdateExpression: 'SET #s = :closed, version = version + :one, updatedAt = :now',
       ConditionExpression: '#s = :live',
       ExpressionAttributeNames: { '#s': 'state' },
       ExpressionAttributeValues: { ':closed': 'Closed', ':live': 'Live', ':one': 1, ':now': new Date(nowMs).toISOString() },
+      ReturnValues: 'ALL_NEW',
     }));
-    return true;
+    return strip<Drop>(result.Attributes)!;
   } catch (e) {
-    if (isConditionFailure(e)) return false;
+    if (isConditionFailure(e)) return undefined;
     throw e;
   }
 }

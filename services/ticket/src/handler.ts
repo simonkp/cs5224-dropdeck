@@ -4,6 +4,7 @@ import { UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { admissionStartsAt, ApiError, entryOpensAt, errorResult, json, keys, sign, type TicketClaims } from '@dropdeck/shared';
 import { ddb, getDropCached, table } from '@dropdeck/shared/ddb';
 import { ssmSecret } from '@dropdeck/shared/secrets';
+import { observeRequest } from '@dropdeck/shared/observability';
 
 /**
  * POST /api/d/{tenantId}/{dropId}/ticket
@@ -53,7 +54,8 @@ async function nextLateNumber(t: string, d: string): Promise<{ n: number; block:
   return { n: b.next++, block: b.end - BLOCK_SIZE };
 }
 
-export async function handler(event: APIGatewayProxyEventV2) {
+export const handler = (event: APIGatewayProxyEventV2) => observeRequest('ticket', event, () => handle(event));
+async function handle(event: APIGatewayProxyEventV2) {
   try {
     const t = event.pathParameters?.tenantId;
     const d = event.pathParameters?.dropId;

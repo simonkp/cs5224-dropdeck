@@ -12,6 +12,8 @@ import { clearSession, getAccessToken, signedInEmail, signedInGroups, signIn, si
 import { message } from '../../lib/format';
 import { cn } from '../../lib/utils';
 import { Mark } from '../../components/mark';
+import { BusinessAnalytics } from './BusinessAnalytics';
+import { OperationsView } from './OperationsView';
 
 // Browser-safe subpath (the package index pulls in node:crypto).
 import { PLANS, TIERS } from '@dropdeck/shared/plans';
@@ -81,16 +83,22 @@ export default function OpsView() {
             <p className="text-sm text-muted">You are signed in as {signedInEmail()}, which is not in the operators group. Shops manage their drops in the <a className="font-semibold text-ink underline" href="/m/">merchant console</a>.</p>
           </Card>
         )}
-        {state === 'ready' && <Dashboard />}
+        {state === 'ready' && <Workspace />}
       </main>
     </div>
   );
+}
+
+function Workspace() {
+  const [view,setView]=useState<'shops'|'operations'>('shops');
+  return <><nav aria-label="Operator views" className="mb-6 flex gap-2"><Button variant={view==='shops'?'ink':'outline'} onClick={()=>setView('shops')} aria-pressed={view==='shops'}>Shops & billing</Button><Button variant={view==='operations'?'ink':'outline'} onClick={()=>setView('operations')} aria-pressed={view==='operations'}>Operations</Button></nav>{view==='shops'?<Dashboard/>:<OperationsView/>}</>;
 }
 
 function Dashboard() {
   const [month, setMonth] = useState(thisMonth);
   const [data, setData] = useState<Overview | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
+  const [analyticsRevision, setAnalyticsRevision] = useState(0);
 
   const load = useCallback(async () => {
     try {
@@ -106,6 +114,7 @@ function Dashboard() {
     setSaving(row.tenantId);
     try {
       await api(`/admin/tenants/${encodeURIComponent(row.tenantId)}`, { method: 'PATCH', body: { tier } });
+      setAnalyticsRevision((revision) => revision + 1);
       toast.success(`${row.name} is now on ${PLANS[tier].label}`);
       await load();
     } catch (e) {
@@ -141,6 +150,7 @@ function Dashboard() {
         )) : Array.from({ length: 7 }, (_, i) => <Skeleton key={i} className="h-[76px]" />)}
       </div>
       <p className="text-[13px] text-muted">Usage is counted when each drop finishes. Billable is a preview from the plans (decision 0007); no payment is taken.</p>
+      <BusinessAnalytics month={month} refreshVersion={analyticsRevision}/>
 
       {data && data.tenants.length === 0 && <Card><p className="text-sm text-muted">No shops yet.</p></Card>}
       {data && data.tenants.length > 0 && (

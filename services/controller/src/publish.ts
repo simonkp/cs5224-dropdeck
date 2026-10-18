@@ -1,5 +1,6 @@
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { s3Keys, type PublicFeatured, type PublicShop, type PublicState } from '@dropdeck/shared';
+import { healthEvent } from '@dropdeck/shared/observability';
 
 const s3 = new S3Client({});
 
@@ -7,13 +8,18 @@ const s3 = new S3Client({});
 export async function writeState(t: string, d: string, state: PublicState): Promise<void> {
   const bucket = process.env.BUCKET_NAME;
   if (!bucket) throw new Error('Missing env BUCKET_NAME');
-  await s3.send(new PutObjectCommand({
+  try { await s3.send(new PutObjectCommand({
     Bucket: bucket,
     Key: s3Keys.stateJson(t, d),
     Body: JSON.stringify(state),
     ContentType: 'application/json',
     CacheControl: 'public, max-age=2',
   }));
+    healthEvent('publication', t, d, { publication: 'state', succeeded: true, sourceVersion: state.sourceVersion });
+  } catch (e) {
+    healthEvent('publication', t, d, { publication: 'state', succeeded: false });
+    throw e;
+  }
 }
 
 /** The merchant's public shop page lists drop states, so it is rebuilt when a drop opens or closes. */

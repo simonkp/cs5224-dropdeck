@@ -323,6 +323,34 @@ importers:
         specifier: ^4.0.0
         version: 4.1.11(@types/node@22.20.5)(vite@8.3.2(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
 
+  services/operations:
+    dependencies:
+      '@aws-sdk/client-dynamodb':
+        specifier: ^3.1146.0
+        version: 3.1146.0
+      '@aws-sdk/client-s3':
+        specifier: ^3.1146.0
+        version: 3.1146.0
+      '@aws-sdk/lib-dynamodb':
+        specifier: ^3.1146.0
+        version: 3.1146.0(@aws-sdk/client-dynamodb@3.1146.0)
+      '@dropdeck/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+    devDependencies:
+      '@types/aws-lambda':
+        specifier: ^8.10.164
+        version: 8.10.164
+      '@types/node':
+        specifier: ^22.20.5
+        version: 22.20.5
+      typescript:
+        specifier: ~5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.0.0
+        version: 4.1.11(@types/node@22.20.5)(vite@8.3.2(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
+
   services/ticket:
     dependencies:
       '@aws-sdk/client-dynamodb':
@@ -351,6 +379,9 @@ importers:
   tests/integration:
     devDependencies:
       '@aws-sdk/client-dynamodb':
+        specifier: ^3.1146.0
+        version: 3.1146.0
+      '@aws-sdk/client-s3':
         specifier: ^3.1146.0
         version: 3.1146.0
       '@aws-sdk/lib-dynamodb':
