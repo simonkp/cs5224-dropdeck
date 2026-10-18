@@ -1,6 +1,6 @@
 # Merchant dashboard: implementation, architecture and workflow
 
-This document describes the merchant features implemented on `feat/merchant-analytics-implementation`. They become available on the shared site after the branch is merged and its deployment succeeds. The merchant console is `/m/`; Analytics is `/m/?view=analytics`.
+The merchant console is `/m/`; Analytics is `/m/?view=analytics`. This guide covers merchant workflows, architecture, configuration and operational limits.
 
 ## Implementation summary
 
@@ -21,7 +21,7 @@ Reporting reads the existing tenant-owned DynamoDB orders on demand. The backend
 | Advanced daily-summary CSV | No | Complete selections only | No |
 | Live QuickSight, Q&A or generative AI | Disabled | Disabled | Disabled |
 
-Plan prices and usage billing are unchanged. The backend reads the merchant's current persisted tier consistently for every report/export request. An advanced request from Starter or Event is rejected; hiding a panel in the browser is not the access control. Unknown tiers receive basic access. Downgrades apply on the next request, including exports.
+The backend reads the merchant's current persisted tier consistently for every report/export request. An advanced request from Starter or Event is rejected; hiding a panel in the browser is not the access control. Unknown tiers receive basic access. Downgrades apply on the next request, including exports.
 
 ## Merchant workflow
 
@@ -141,7 +141,7 @@ flowchart LR
 | AWS Budgets | Existing account budget sends actual-spend alerts when its configured email is present; alerts are delayed notifications, not a hard spending cap |
 | Amazon QuickSight | Intended managed BI service represented by the Growth preview; no subscription, users, datasets, permissions or infrastructure are provisioned |
 
-There is no new DynamoDB Streams consumer, separate analytics database, SQS export worker, S3 export archive, Athena query or Bedrock invocation. This keeps deployment aligned with the requested preview and avoids adding paid BI resources. Checkout SES delivery and operations monitoring retain their existing configuration. Reminder sends share the account’s SES quota and add usage-based email charges.
+Analytics uses no DynamoDB Streams consumer, separate analytics database, SQS export worker, S3 export archive, Athena query or Bedrock invocation. Advanced analytics runs within DropDeck without provisioning paid BI resources. Checkout SES delivery and operations monitoring have separate configuration. Reminder sends share the account’s SES quota and add usage-based email charges.
 
 ## Data integrity, history and retention
 
@@ -169,7 +169,7 @@ Orders and audit entries use the same expiry: 180 days after drop end. Analytics
 
 The existing profile, drop lifecycle, order, live, report, usage and per-drop CSV routes remain in place.
 
-CDK stage settings `merchantAnalyticsEnabled` and `growthAnalyticsPreviewEnabled` independently configure core analytics and Growth preview exposure. Both are enabled in the committed staging settings; new stages default off. Core analytics does not depend on `operationsEnabled`. QuickSight remains disconnected in the capability response and has no provisioning or service-call path. Enabling the Growth preview never activates a QuickSight subscription.
+CDK stage settings `merchantAnalyticsEnabled` and `growthAnalyticsPreviewEnabled` independently configure core analytics and Growth preview exposure. Staging enables both; new stages default off. Core analytics does not depend on `operationsEnabled`. QuickSight remains disconnected in the capability response and has no provisioning or service-call path. Enabling the Growth preview never activates a QuickSight subscription.
 
 ## Cost management and operational limits
 
@@ -183,7 +183,7 @@ CDK stage settings `merchantAnalyticsEnabled` and `growthAnalyticsPreviewEnabled
 
 Costs depend mainly on source bytes read, refresh frequency, Lambda duration and audit writes. At Singapore on-demand rates checked on 18 October 2026, strongly consistent reads consume one read unit per rounded 4 KB of queried data, DynamoDB reads cost $0.1425/million units and writes $0.71/million units; transactional writes consume twice the ordinary write units. Query limits count evaluated rows, and projection/filter expressions do not make source reads free. [DynamoDB pricing](https://aws.amazon.com/dynamodb/pricing/), [Singapore price list](https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonDynamoDB/current/ap-southeast-1/index.json).
 
-For scale context, 100,000 maximum-size reports reading 20 × 500 one-KB order rows would consume roughly 250 million read units, or **$35.63 in reads alone**, before profile/quota requests, compute and other charges. Typical smaller drop reports cost much less. Therefore the earlier plan's $5 allowance is not a spending guarantee for this source-query implementation. Measure request volume, consumed capacity and duration under the team's actual workload before increasing limits. Existing budget alerts can arrive after charges have accrued. [AWS Budgets behavior](https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-managing-costs.html).
+For scale context, 100,000 maximum-size reports reading 20 × 500 one-KB order rows would consume roughly 250 million read units, or **$35.63 in reads alone**, before profile/quota requests, compute and other charges. Typical smaller drop reports cost much less. Measure request volume, consumed capacity and duration under the team's actual workload before increasing limits. Existing budget alerts can arrive after charges have accrued. [AWS Budgets behavior](https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-managing-costs.html).
 
 QuickSight Author/Reader, session capacity and Q/Pro charges are excluded because that service is not activated. [QuickSight pricing](https://aws.amazon.com/quick/quicksight/pricing/).
 
