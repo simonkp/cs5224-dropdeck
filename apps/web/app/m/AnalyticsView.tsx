@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ArrowDownToLine, ArrowUpRight, Check, RefreshCw } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpRight, ChartNoAxesCombined, Check, Layers3, RefreshCw, TrendingUp, Trophy } from 'lucide-react';
 import type { Order } from '@dropdeck/shared';
 import { singaporeDay, trackingOf, trackingCsv, type OrderTracking, type SalesTotals } from '@dropdeck/shared/merchant-analytics';
 import { api, apiText, ApiRequestError } from '../../lib/api';
@@ -67,7 +67,19 @@ export function AnalyticsView({ctx}:{ctx:ConsoleCtx}) {
         <p className="text-xs text-muted">Figures include retained order records only; order details expire 180 days after the drop.</p>
         {data.scope.retentionLimited&&<p role="status" className="rounded-xl bg-warn-tint p-3 text-sm text-warn">This selection or its comparison period extends into expired history. Missing records cannot be reconstructed; figures and changes may be incomplete.</p>}
         {data.legacyDates&&<p className="text-xs text-muted">Legacy orders use their reservation date. New orders use confirmation time. Detailed results include only retained order records.</p>}
-        {tab==='advanced'&&(<div className="rounded-2xl border border-line bg-sunken p-4"><span className="rounded-full bg-volt px-2 py-1 text-[11px] font-extrabold text-[#101114]">GROWTH · PREVIEW</span><h2 className="mt-3 font-display text-xl font-extrabold">Advanced analytics preview</h2><p className="mt-1 text-sm text-muted">QuickSight integration is not connected. These charts use your shop’s data and are rendered by DropDeck. No AI or QuickSight service is running.</p></div>)}
+        {tab==='advanced'&&<section aria-label="Growth analytics preview" className="relative isolate overflow-hidden rounded-[24px] bg-[#101114] p-5 text-white sm:p-7">
+          <div aria-hidden="true" className="pointer-events-none absolute -top-20 -right-16 -z-10 size-64 rounded-full bg-volt/10 blur-3xl"/>
+          <div className="flex items-start justify-between gap-4">
+            <div className="max-w-lg">
+              <span className="inline-flex items-center gap-2 rounded-full border border-volt/20 bg-volt/10 px-3 py-1 text-[10px] font-extrabold tracking-[0.12em] text-volt"><span aria-hidden="true" className="size-1.5 rounded-full bg-volt"/>GROWTH · PREVIEW</span>
+              <h2 className="mt-4 font-display text-[28px] leading-[1.08] font-extrabold tracking-[-0.03em] sm:text-[34px]">See what’s driving<br className="hidden sm:block"/> your sales.</h2>
+              <p className="mt-3 max-w-sm text-sm leading-relaxed text-[#b8bdc7]">Compare your drops, discover your bestsellers and turn your shop’s results into a clearer next step.</p>
+            </div>
+            <div aria-hidden="true" className="mt-1 flex size-12 shrink-0 items-center justify-center rounded-2xl border border-volt/20 bg-volt/10 text-volt sm:size-16"><ChartNoAxesCombined className="size-6 sm:size-8" strokeWidth={1.5}/></div>
+          </div>
+          <div className="mt-6 flex flex-wrap gap-x-5 gap-y-3 text-xs font-semibold text-[#e0e3e8]">{[{icon:Layers3,title:'Compare drops'},{icon:Trophy,title:'Find bestsellers'},{icon:TrendingUp,title:'Spot sales trends'}].map(({icon:Icon,title})=><span key={title} className="inline-flex items-center gap-2"><Icon aria-hidden="true" className="size-3.5 text-volt"/>{title}</span>)}</div>
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-4 text-[11px] text-[#949ba8]"><span>Built into DropDeck · uses your shop’s data</span><span className="inline-flex items-center gap-1.5"><span aria-hidden="true" className="size-1.5 rounded-full bg-[#949ba8]"/>QuickSight not connected</span></div>
+        </section>}
         {(tab==='overview'||tab==='advanced')&&<>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{[
             ['Confirmed value',price(data.totals.confirmedCents),`${data.totals.orders} orders · ${data.totals.units} units`],
