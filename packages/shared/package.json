@@ -14,6 +14,7 @@
     "./branding": "./src/branding.ts",
     "./plans": "./src/plans.ts",
     "./merchant-analytics": "./src/merchant-analytics.ts",
+    "./payment-reminders": "./src/payment-reminders.ts",
     "./order-tracking-store": "./src/order-tracking-store.ts",
     "./lifecycle": "./src/lifecycle.ts"
   },

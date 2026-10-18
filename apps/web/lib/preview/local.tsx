@@ -5,11 +5,12 @@ import { saveSession } from '../../app/d/buyer';
 import { operatorPreview } from './operations';
 import { analyticsCapabilities } from '@dropdeck/shared/plans';
 import { summarizeSales, trackingOf } from '@dropdeck/shared/merchant-analytics';
+import { reminderProblem, REMINDER_BATCH_LIMIT, REMINDER_COOLDOWN_MS, type PaymentReminder, type ReminderOrder, type ReminderResult } from '@dropdeck/shared/payment-reminders';
 
 const KEY = 'dd.preview.v2';
 const iso = (ms: number) => new Date(ms).toISOString();
 const scenarios = ['countdown', 'entry', 'drawing', 'queued', 'admitted', 'held', 'code-sent', 'confirmed', 'reserved', 'expired', 'closed', 'cancelled', 'missing', 'kopi', 'hue', 'turn-expired', 'closed-hold', 'cancelled-order', 'delayed'];
-interface Data { profile: MerchantProfile; drops: Drop[]; orders: Order[]; history?: Record<string, Array<Record<string,unknown>>>; holds: Record<string, { dropId: string; expiresAt: string; variantId: string; qty: number; sentAt?: number; sends: number; attempts: number; email?: string; confirmed?: boolean; orderRef?: string }>; seeded: string[] }
+interface Data { profile: MerchantProfile; drops: Drop[]; orders: ReminderOrder[]; reminderHistory?:Record<string,Array<PaymentReminder&{actor:string}>>; reminderRequests?:Record<string,ReminderResult[]>; history?: Record<string, Array<Record<string,unknown>>>; holds: Record<string, { dropId: string; expiresAt: string; variantId: string; qty: number; sentAt?: number; sends: number; attempts: number; email?: string; confirmed?: boolean; orderRef?: string }>; seeded: string[] }
 let data: Data;
 let installed = false;
 const persist = () => localStorage.setItem(KEY, JSON.stringify(data));
@@ -75,7 +76,7 @@ export function install() {
     const path = p.slice('/__local'.length);
     if(path==='/m/analytics'||path==='/m/analytics/export.csv') {
       const advanced=url.searchParams.get('advanced')==='1'||path.endsWith('.csv');
-      const capabilities={tier:data.profile.tier,...analyticsCapabilities(data.profile.tier),enabled:true};
+      const capabilities={tier:data.profile.tier,...analyticsCapabilities(data.profile.tier),enabled:true,reminderMode:'demo'};
       if(advanced&&!capabilities.advancedPreview)return error('PLAN_LIMIT','Advanced analytics preview is available only on Growth',402);
       const from=url.searchParams.get('from')??iso(Date.now()-6*86400000).slice(0,10);const to=url.searchParams.get('to')??iso(Date.now()).slice(0,10);
       if((Date.parse(to)-Date.parse(from))/86400000+1>(advanced?90:31))return error('VALIDATION','Select a shorter date range');
@@ -84,12 +85,27 @@ export function install() {
       if(path.endsWith('.csv'))return new Response(['day,orders,confirmed_sgd,recorded_paid_sgd',...report.days.map(d=>[d.day,d.orders,d.confirmedCents/100,d.paidCents/100].join(','))].join('\r\n'),{headers:{'content-type':'text/csv'}});
       return response({enabled:true,capabilities,advanced,preview:advanced,generatedAt:iso(Date.now()),from,to,scope:{drops:ds.length,availableDrops:ds.length,maxOrdersPerDrop:500,partial:false},...report});
     }
+    if(path==='/m/payment-reminders'&&method==='POST') {
+      if(!Array.isArray(body.refs)||!body.refs.length||body.refs.length>REMINDER_BATCH_LIMIT||typeof body.requestId!=='string')return error('VALIDATION','Choose up to 10 orders and provide a request ID');
+      const drop=data.drops.find(d=>d.dropId===body.dropId);if(!drop)return error('NOT_FOUND','Drop not found',404);
+      if(!data.profile.paynow?.trim())return error('VALIDATION','Add your shop’s PayNow payment instructions before sending reminders');
+      data.reminderHistory??={};data.reminderRequests??={};
+      const requestKey=`${drop.dropId}/${body.requestId}`;
+      if(data.reminderRequests[requestKey])return response({mode:'demo',results:data.reminderRequests[requestKey]});
+      const results:ReminderResult[]=body.refs.map(ref=>{
+        const order=data.orders.find(o=>o.dropId===drop.dropId&&o.ref===ref);if(!order)return {ref:String(ref),status:'skipped',message:'Order not found.'};
+        const problem=reminderProblem(order,drop);if(problem)return {ref:order.ref,status:'skipped',message:problem};
+        order.paymentReminder={status:'accepted',attemptedAt:iso(Date.now()),nextAllowedAt:Date.now()+REMINDER_COOLDOWN_MS};
+        data.reminderHistory![order.ref]=[{...order.paymentReminder,actor:'preview'},...(data.reminderHistory![order.ref]??[])];
+        return {ref:order.ref,status:'accepted',message:'Simulated only. No email was sent.'};
+      });data.reminderRequests[requestKey]=results;persist();return response({mode:'demo',results});
+    }
     if(path==='/m/order-worklist')return response({enabled:true,rows:data.orders.filter(o=>o.dropId===url.searchParams.get('dropId')&&(!url.searchParams.get('payment')||trackingOf(o).paymentStatus===url.searchParams.get('payment'))&&(!url.searchParams.get('fulfillment')||trackingOf(o).fulfillmentStatus===url.searchParams.get('fulfillment')))});
     const trackingRoute=path.match(/^\/m\/orders\/([^/]+)\/(tracking|history)$/);
     if(trackingRoute){
       const o=data.orders.find(o=>o.ref===trackingRoute[1]);if(!o)return error('NOT_FOUND','Order not found',404);
       data.history??={};
-      if(trackingRoute[2]==='history')return response({rows:data.history[o.ref]??[],partial:false});
+      if(trackingRoute[2]==='history')return response({rows:data.history[o.ref]??[],partial:false,paymentReminders:{rows:data.reminderHistory?.[o.ref]??[],partial:false}});
       if((o.version??0)!==body.expectedVersion)return error('INVALID_STATE','Order changed. Refresh before saving again.',409);
       const after={...trackingOf(o),...(body.patch as object)};o.tracking=after;o.version=(o.version??0)+1;
       o.status=after.attendanceStatus==='no_show'?'no-show':after.paymentStatus==='paid'?'paid':'confirmed';

@@ -304,8 +304,8 @@ export class DropDeckStack extends Stack {
       });
     };
 
-    // 15 s: a profile save republishes every published drop page of the shop.
-    const merchantFn = fn('MerchantApi', 'services/merchant-api/src/handler.ts', { timeout: 15 });
+    // Bounded reminder batches and profile saves finish within HTTP API's integration timeout.
+    const merchantFn = fn('MerchantApi', 'services/merchant-api/src/handler.ts', { timeout: 28 });
     merchantFn.addEnvironment('MERCHANT_ANALYTICS_ENABLED',props.merchantAnalyticsEnabled?'1':'0');
     merchantFn.addEnvironment('GROWTH_ANALYTICS_PREVIEW_ENABLED',props.growthAnalyticsPreviewEnabled?'1':'0');
     const ticketFn = fn('Ticket', 'services/ticket/src/handler.ts', { memory: 256 });
@@ -338,6 +338,16 @@ export class DropDeckStack extends Stack {
       const domain = props.mailFrom.replace(/^.*<|>$/g, '').split('@')[1];
       checkoutFn.addEnvironment('MAIL_MODE', 'ses');
       checkoutFn.addEnvironment('MAIL_FROM', props.mailFrom);
+      if (props.merchantAnalyticsEnabled) {
+        const sender = props.mailFrom.replace(/^.*<|>$/g, '').trim();
+        merchantFn.addEnvironment('MAIL_MODE', 'ses');
+        merchantFn.addEnvironment('MAIL_FROM', props.mailFrom);
+        merchantFn.addToRolePolicy(new PolicyStatement({
+          actions: ['ses:SendEmail'],
+          resources: [`arn:aws:ses:${this.region}:${this.account}:identity/${domain}`, `arn:aws:ses:${this.region}:${this.account}:identity/${sender}`],
+          conditions: { StringEquals: { 'ses:FromAddress': sender } },
+        }));
+      }
       checkoutFn.addToRolePolicy(new PolicyStatement({
         actions: ['ses:SendEmail'],
         resources: [`arn:aws:ses:${this.region}:${this.account}:identity/${domain}`, `arn:aws:ses:${this.region}:${this.account}:identity/*@${domain}`],
@@ -388,6 +398,7 @@ export class DropDeckStack extends Stack {
     const authorizer = new HttpUserPoolAuthorizer('MerchantAuth', userPool, { userPoolClients: [userPoolClient] });
     const merchantIntegration = new HttpLambdaIntegration('MerchantInt', merchantFn);
     const merchantRoutes: Array<[HttpMethod, string]> = [
+      [HttpMethod.POST, '/m/payment-reminders'],
       [HttpMethod.GET, '/m/analytics'], [HttpMethod.GET, '/m/analytics/export.csv'], [HttpMethod.GET, '/m/order-worklist'],
       [HttpMethod.GET, '/m/drops/{dropId}/inventory'],
       [HttpMethod.PATCH, '/m/orders/{ref}/tracking'], [HttpMethod.GET, '/m/orders/{ref}/history'],

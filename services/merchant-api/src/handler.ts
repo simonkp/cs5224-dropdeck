@@ -11,6 +11,7 @@ import { buildReport, ordersCsv } from './reports.js';
 import { activeHoldCount, unitsSold } from '@dropdeck/shared/ddb';
 import { updateOrderTracking, orderHistory } from '@dropdeck/shared/order-tracking-store';
 import { analyticsEnabled, analyticsReport, exportAnalytics, inventorySnapshot, orderWorklist } from './analytics.js';
+import { reminderHistory, sendPaymentReminders } from './payment-reminders.js';
 import { decodeImage } from './images.js';
 import { assertSchedulable, DEFAULTS, validateDropInput, validateProfileInput } from './validate.js';
 
@@ -43,6 +44,8 @@ export async function handler(event: Event) {
     const body = () => parseBody<Record<string, unknown>>(event.body, event.isBase64Encoded);
 
     switch (event.routeKey) {
+      case 'POST /m/payment-reminders':
+        return json(200, await sendPaymentReminders(t,body()));
       case 'GET /m/analytics':
         return json(200, await analyticsReport(t,event.queryStringParameters??{}));
       case 'GET /m/drops/{dropId}/inventory':
@@ -59,7 +62,8 @@ export async function handler(event: Event) {
       case 'GET /m/orders/{ref}/history': {
         const dropId=event.queryStringParameters?.dropId;
         if(!dropId)throw new ApiError('VALIDATION','dropId is required');
-        return json(200,await orderHistory(t,dropId,event.pathParameters!.ref!));
+        const history=await orderHistory(t,dropId,event.pathParameters!.ref!);
+        return json(200,{...history,paymentReminders:await reminderHistory(t,dropId,event.pathParameters!.ref!)});
       }
       case 'GET /m/profile':
         return json(200, (await repo.getProfile(t)) ?? null);
@@ -290,6 +294,7 @@ export async function handler(event: Event) {
 
 /** Routes registered in infra; keep in sync with the switch above. */
 export const ROUTES = [
+  'POST /m/payment-reminders',
   'GET /m/analytics', 'GET /m/analytics/export.csv', 'GET /m/order-worklist', 'GET /m/drops/{dropId}/inventory', 'PATCH /m/orders/{ref}/tracking', 'GET /m/orders/{ref}/history',
   'GET /m/profile', 'PUT /m/profile', 'GET /m/slugs/{slug}', 'POST /m/uploads', 'GET /m/usage',
   'GET /m/drops', 'POST /m/drops',

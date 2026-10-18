@@ -4,12 +4,13 @@ import { ApiError, keys, type Drop, type MerchantProfile, type Order } from '@dr
 import { analyticsCapabilities } from '@dropdeck/shared/plans';
 import { summarizeSales, singaporeDay, trackingOf } from '@dropdeck/shared/merchant-analytics';
 import { listDrops } from './repo.js';
+import { attachReminders, remindersEnabled } from './payment-reminders.js';
 
 export const analyticsEnabled = () => process.env.MERCHANT_ANALYTICS_ENABLED === '1';
 export async function merchantCapabilities(t: string) {
   const r = await ddb.send(new GetCommand({ TableName: table(), Key: keys.profile(t), ConsistentRead:true }));
   const tier = r.Item?.tier as MerchantProfile['tier'] | undefined;
-  return { tier: tier === 'growth' || tier === 'event' ? tier : 'starter', ...analyticsCapabilities(tier, process.env.GROWTH_ANALYTICS_PREVIEW_ENABLED === '1'), enabled: analyticsEnabled(), quickSightConnected: false as const };
+  return { tier: tier === 'growth' || tier === 'event' ? tier : 'starter', ...analyticsCapabilities(tier, process.env.GROWTH_ANALYTICS_PREVIEW_ENABLED === '1'), enabled: analyticsEnabled(), quickSightConnected: false as const, reminderMode: remindersEnabled() ? 'ses' as const : 'disabled' as const };
 }
 function isoDay(value: string | undefined, fallback: string) {
   const day=value??fallback;
@@ -60,7 +61,7 @@ export async function orderWorklist(t:string,q:Record<string,string|undefined>){
     const tr=trackingOf(o);
     return (!q.payment||q.payment===tr.paymentStatus)&&(!q.fulfillment||q.fulfillment===tr.fulfillmentStatus)&&(!q.method||q.method===tr.fulfillmentMethod);
   });
-  return {enabled:true,rows,nextCursor:page.LastEvaluatedKey?Buffer.from(JSON.stringify(page.LastEvaluatedKey)).toString('base64url'):undefined,scope:'Filtered page of 50 evaluated orders; continue paging when no matches appear.'};
+  return {enabled:true,rows:await attachReminders(t,q.dropId,rows),nextCursor:page.LastEvaluatedKey?Buffer.from(JSON.stringify(page.LastEvaluatedKey)).toString('base64url'):undefined,scope:'Filtered page of 50 evaluated orders; continue paging when no matches appear.'};
 }
 export async function inventorySnapshot(t:string,dropId:string){
   if(!analyticsEnabled())throw new ApiError('NOT_IMPLEMENTED','Merchant analytics is not enabled');

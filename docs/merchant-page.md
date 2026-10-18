@@ -14,6 +14,7 @@ Reporting reads the existing tenant-owned DynamoDB orders on demand. The backend
 | Basic date range | Up to 31 days | Up to 31 days | Up to 31 days |
 | Per-drop stock diagnostics and existing CSV export | Yes | Yes | Yes |
 | Manual payment, pickup and shipping tracking | Yes | Yes | Yes |
+| Individual and bulk payment reminder emails | With SES sender | With SES sender | With SES sender |
 | Versioned changes and order history | Yes | Yes | Yes |
 | Cross-drop comparison, variant ranking and calculated insights | No | Advanced preview | No |
 | Advanced date range and previous-period comparison | No | Up to 90 days | No |
@@ -51,6 +52,22 @@ Select Payments and a drop, filter by awaiting, paid or unknown payment, and ope
 New and legacy orders retain their existing order reference. Legacy `paid` maps to recorded paid; legacy `confirmed` maps to awaiting; legacy `no-show` maps to unknown payment because the old single field cannot establish prior payment history. A no-show can be paid, so attendance is now tracked independently.
 
 Reversing a paid status requires a reason in the Analytics editor. The older per-drop status route uses the same safe update function; a reversal requiring a reason must be performed in Analytics. The older report keeps its awaiting/no-show presentation while recognizing paid no-shows from the separate tracking fields.
+
+### Payment reminders
+
+In Payments, select a live or ended drop. Select individual awaiting-payment orders, or select up to 10 eligible orders on the current worklist page, then choose **Review reminders**. Opening an eligible order also offers **Review payment reminder**. The review panel lists each recipient and amount and lets the merchant preview each personalized email before choosing **Send reminders**. Selection is cleared on pagination, filter changes or refreshing orders; it never implicitly selects orders on other pages.
+
+The fixed plain-text template includes only the buyer’s name, order reference, drop title, quantity/item, SGD amount and the shop’s saved PayNow instructions. Each SES request has exactly one recipient. Other buyers, merchant notes and shipping references are excluded. The platform’s configured, verified SES address sends on behalf of the shop; the buyer’s address is only the recipient. Merchants must save payment instructions before sending. The server reconstructs emails from tenant-owned records rather than accepting arbitrary recipients or message content from the browser.
+
+The server rechecks current retained orders and rejects paid, unknown-payment, no-show, zero-value, invalid-address and cancelled/draft/scheduled-drop orders. A transaction checks the order/drop versions, reserves the per-order cooldown, creates an attempt audit and consumes the tenant’s daily allowance before sending. This closes conflicts before the send reservation; payment changes after that reservation can still race with an external email send. The template asks already-paid buyers to disregard the reminder and contact the shop for reconciliation.
+
+SES acceptance is displayed separately from inbox delivery. Results are returned per order, so partial success remains visible. A repeated request ID for the same order returns its recorded result without sending again. Successful, in-progress and uncertain attempts block another reminder for 24 hours. An explicit SES 4xx rejection (other than a request timeout) allows another attempt after one minute with a new request ID. SDK automatic retries and the OTP Resend fallback are disabled for reminders: a network timeout may mean SES already accepted the message. If saving the final result fails, the initial sending receipt remains a conservative cooldown lock. Operators investigate uncertain outcomes before retrying; the UI does not claim exactly-once inbox delivery.
+
+Batches are synchronous, at most 10 orders with two sends in parallel, and capped at 100 attempts per shop per UTC day. These limits control accidental repeat mail, execution time and cost; they do not replace SES account sending quotas. A sandbox account can reject unverified recipients or throttle a batch. Sender verification and production access are region/account specific. [SES identity requirements](https://docs.aws.amazon.com/ses/latest/dg/verify-addresses-and-domains.html), [SES sandbox restrictions](https://docs.aws.amazon.com/ses/latest/dg/request-production-access.html).
+
+The Payments worklist shows the latest attempt status/time, and order details show a bounded reminder audit history (up to 100 attempts, with a truncation warning). Audit records contain the actor, order reference, attempt time/outcome, cooldown and SES message ID when available; they do not copy email addresses or message bodies. Reminder records expire with the order, 180 days after drop end. The reminder feature does not change recorded payment, stock or pickup/delivery status.
+
+Local demo mode explicitly labels this action **Simulate reminders** and never calls SES. Normal deployments expose sending only when core merchant analytics and `mailFrom` are configured. No sender means a visible unavailable explanation, rather than silently reporting a simulated send as successful.
 
 ### Pickup & delivery
 
@@ -105,6 +122,8 @@ flowchart LR
     Buyer[Buyer checkout Lambda] --> Source
     Scheduler[EventBridge Scheduler and controller] --> Source
     Scheduler --> Public[Public S3 drop state served through CloudFront]
+    Merchant --> SES[Amazon SES: individual payment reminder emails]
+    SES --> Recipient[Selected order buyer]
     Merchant --> Logs[Existing Lambda logs and operational monitoring]
 ```
 
@@ -114,12 +133,13 @@ flowchart LR
 | Cognito + API Gateway HTTP API | Existing JWT authentication protects all analytics, tracking and history routes; tenant identity comes from verified `sub` |
 | Merchant Lambda | Validates entitlements, performs bounded reads and calculates charts; reuses the existing function rather than adding always-on compute |
 | DynamoDB on-demand | Existing tenant-prefixed source data; transactions atomically save order tracking and an audit receipt; on-demand billing follows activity |
+| Amazon SES | Reuses the stage’s verified sender for transactional reminders. IAM restricts the merchant function to the sender identity/domain and exact From address. Reminders do not use the checkout OTP configuration set, so they cannot inflate OTP delivery metrics. Per-order outcomes are stored in DynamoDB; this feature does not add a reminder delivery-event pipeline |
 | EventBridge Scheduler/controller | Existing drop scheduling and lifecycle; not an analytics aggregation scheduler |
 | CloudWatch | Existing function logs and optional operational monitoring; no per-merchant custom metric series is added by analytics |
 | AWS Budgets | Existing account budget sends actual-spend alerts when its configured email is present; alerts are delayed notifications, not a hard spending cap |
 | Amazon QuickSight | Intended managed BI service represented by the Growth preview; no subscription, users, datasets, permissions or infrastructure are provisioned |
 
-There is no new DynamoDB Streams consumer, separate analytics database, SQS export worker, S3 export archive, Athena query or Bedrock invocation. This keeps deployment aligned with the requested preview and avoids adding paid BI resources. Existing checkout SES delivery and operations monitoring retain their own configuration and costs.
+There is no new DynamoDB Streams consumer, separate analytics database, SQS export worker, S3 export archive, Athena query or Bedrock invocation. This keeps deployment aligned with the requested preview and avoids adding paid BI resources. Checkout SES delivery and operations monitoring retain their existing configuration. Reminder sends share the account’s SES quota and add usage-based email charges.
 
 ## Data integrity, history and retention
 
@@ -139,10 +159,11 @@ Orders and audit entries use the same expiry: 180 days after drop end. Analytics
 | --- | --- |
 | `GET /m/analytics` | Basic report; `advanced=1` requires Growth and the preview setting |
 | `GET /m/analytics/export.csv` | Growth-only, complete daily-summary export; export quota applies |
+| `POST /m/payment-reminders` | Authenticated manual send; body includes drop ID, 1–10 unique order references and request ID; returns per-order outcomes |
 | `GET /m/order-worklist` | Drop-scoped, paginated payment/fulfillment worklist |
 | `GET /m/drops/{dropId}/inventory` | Bounded stock-shard and confirmed-order diagnostic snapshot |
 | `PATCH /m/orders/{ref}/tracking` | Versioned manual action; body includes drop ID, request ID, expected version and tracking patch |
-| `GET /m/orders/{ref}/history` | Tenant-owned retained order history; query includes drop ID |
+| `GET /m/orders/{ref}/history` | Tenant-owned retained tracking and reminder history; query includes drop ID |
 
 The existing profile, drop lifecycle, order, live, report, usage and per-drop CSV routes remain in place.
 
@@ -150,6 +171,7 @@ CDK stage settings `merchantAnalyticsEnabled` and `growthAnalyticsPreviewEnabled
 
 ## Cost management and operational limits
 
+- Reuse the stage’s SES sender for payment reminders; no new email worker, queue or subscription. Limit batches to 10, use two concurrent sends, enforce a 24-hour order cooldown and a 100-attempt UTC-day tenant quota. Failed attempts also consume quota. Reminder audit/latest rows expire with the order, and quota rows expire after two days. The merchant function timeout is 28 seconds; SES connection/request timeouts and disabled SDK retries bound individual send attempts. Account-wide SES throttling still applies, including competition with checkout emails.
 - Reuse the existing function/table and static hosting. This feature adds usage and retained audit storage, but no additional always-on resource or BI subscription.
 - Limit source work to 20 drops × 500 evaluated orders, four concurrent queries, a 31-day basic range or 90-day advanced range. Display partial results explicitly rather than running an unbounded table scan.
 - Permit up to 30 analytics requests per merchant per UTC minute; enforce this with a tenant quota row. Quota rows expire after an hour. Advanced exports have a separate two-per-hour quota expiring after one day.
@@ -164,6 +186,8 @@ For scale context, 100,000 maximum-size reports reading 20 × 500 one-KB order r
 QuickSight Author/Reader, session capacity and Q/Pro charges are excluded because that service is not activated. [QuickSight pricing](https://aws.amazon.com/quick/quicksight/pricing/).
 
 ## Verification and deployment boundary
+
+Reminder tests cover per-buyer templates, replay/concurrency protection, payment changes, tenant isolation, logical expiry, cancellation, sender configuration, daily limits, partial SES failure, uncertain sends and final-receipt write failure against DynamoDB Local with a mocked mail transport. They send no real email. Infrastructure assertions check reminder JWT authentication and sender-scoped SES permissions.
 
 Integration coverage includes persisted plan enforcement/downgrades, malformed dates, request replay, concurrent edits, required reversal/override reasons, shipping validation, tenant/cursor isolation, logical expiry, partial report/export behavior, export quotas and checkout retry preservation. Infrastructure assertions verify JWT-protected routes, enabled capability flags and absence of QuickSight resources/permissions. Production export checks exclude local fixture/authentication shortcuts.
 
