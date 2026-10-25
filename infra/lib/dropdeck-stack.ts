@@ -73,6 +73,11 @@ export interface DropDeckStackProps extends StackProps {
   /** Late ticket numbers reserved per counter write; the fairness experiment varies it. */
   ticketBlockSize?: number;
   /**
+   * Most ticket function copies that may run at once (reserved concurrency). Unset means no cap, sharing the
+   * account's pool. Joins over the cap are refused with 503 and the buyer page retries them.
+   */
+  ticketConcurrency?: number;
+  /**
    * Sender for email codes, e.g. "DropDeck <codes@dropdeck.example>", verified in SES. Unset means log mode: no
    * email is sent and the code is shown to the page, which only non-prod stages may use.
    */
@@ -286,7 +291,7 @@ export class DropDeckStack extends Stack {
     const scheduleGroup = new CfnScheduleGroup(this, 'ScheduleGroup', { name: `dropdeck-${stage}` });
 
     // ---- Functions ----
-    const fn = (name: string, entry: string, extra: { memory?: number; timeout?: number } = {}) => {
+    const fn = (name: string, entry: string, extra: { memory?: number; timeout?: number; reserved?: number } = {}) => {
       const logGroup = new LogGroup(this, `${name}Logs`, {
         retention: RetentionDays.ONE_MONTH,
         removalPolicy: RemovalPolicy.DESTROY,
@@ -298,6 +303,7 @@ export class DropDeckStack extends Stack {
         architecture: Architecture.ARM_64,
         memorySize: extra.memory ?? 512,
         timeout: Duration.seconds(extra.timeout ?? 10),
+        reservedConcurrentExecutions: extra.reserved,
         logGroup,
         environment: { TABLE_NAME: table.tableName, BUCKET_NAME: bucket.bucketName, STAGE: stage },
         bundling: { format: OutputFormat.ESM, minify: true, sourceMap: true, target: 'node22' },
@@ -308,7 +314,7 @@ export class DropDeckStack extends Stack {
     const merchantFn = fn('MerchantApi', 'services/merchant-api/src/handler.ts', { timeout: 28 });
     merchantFn.addEnvironment('MERCHANT_ANALYTICS_ENABLED',props.merchantAnalyticsEnabled?'1':'0');
     merchantFn.addEnvironment('GROWTH_ANALYTICS_PREVIEW_ENABLED',props.growthAnalyticsPreviewEnabled?'1':'0');
-    const ticketFn = fn('Ticket', 'services/ticket/src/handler.ts', { memory: 256 });
+    const ticketFn = fn('Ticket', 'services/ticket/src/handler.ts', { memory: 256, reserved: props.ticketConcurrency });
     ticketFn.addEnvironment('BLOCK_SIZE', String(props.ticketBlockSize ?? 10));
     const claimFn = fn('Claim', 'services/claim/src/handler.ts');
     const checkoutFn = fn('Checkout', 'services/checkout/src/handler.ts');

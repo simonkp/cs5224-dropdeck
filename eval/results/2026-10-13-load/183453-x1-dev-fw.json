@@ -1,0 +1,1020 @@
+{
+  "at": "2026-10-13T18:34:53.898Z",
+  "experiment": "load",
+  "stage": "dev-fw",
+  "scale": 1,
+  "drop": "load-2acd3742/fuwfhbgs",
+  "pass": true,
+  "checks": {
+    "soldEqualsHolds": true,
+    "noShardOverCapacity": true,
+    "soldIsMinBuyersUnits": true,
+    "ordersEqualSold": true,
+    "noUnexpectedRefusals": true,
+    "liveByEntryTime": true,
+    "earlyCountMatchesTickets": true
+  },
+  "firstDegradation": "8 requests throttled (429); every buyer got through on a retry",
+  "degradation": {
+    "throttled429": 8,
+    "server5xx": 0,
+    "networkErrors": 0,
+    "buyersWithoutTicket": 0,
+    "drawPhantoms": 0,
+    "joinsFailingUntilSecAfterOpen": 9,
+    "buyersWhoRetriedTheJoin": 7,
+    "clientSaturated": true
+  },
+  "coldStart": true,
+  "account": {
+    "limit": 400,
+    "peakAtOnce": 129,
+    "peakShareOfLimit": 0.323
+  },
+  "functions": {
+    "ticket": {
+      "invocations": 4458,
+      "copiesUsed": 128,
+      "startedInWindow": 127,
+      "alreadyRunning": 1,
+      "avgStartMs": 426,
+      "peakAtOnce": 128,
+      "refusedByLambda": 0,
+      "warmShare": 0.008,
+      "peakShareOfLimit": 0.32
+    },
+    "claim": {
+      "invocations": 224,
+      "copiesUsed": 21,
+      "startedInWindow": 21,
+      "alreadyRunning": 0,
+      "avgStartMs": 375,
+      "peakAtOnce": 24,
+      "refusedByLambda": 0,
+      "warmShare": 0,
+      "peakShareOfLimit": 0.06
+    },
+    "checkout": {
+      "invocations": 200,
+      "copiesUsed": 17,
+      "startedInWindow": 17,
+      "alreadyRunning": 0,
+      "avgStartMs": 547,
+      "peakAtOnce": 18,
+      "refusedByLambda": 0,
+      "warmShare": 0,
+      "peakShareOfLimit": 0.045
+    }
+  },
+  "config": {
+    "buyers": 5000,
+    "units": 200,
+    "shards": 4,
+    "seed": 1,
+    "ratePreset": "fast",
+    "admissionRatePerMin": 400,
+    "holdSec": 120,
+    "entryWindowMin": 1,
+    "graceSec": 30,
+    "burstShare": 0.5,
+    "spikeSec": 5,
+    "lateShare": 0.2,
+    "connections": 128,
+    "polling": "one shared poller at 1 Hz; the crowd's polling is not reproduced"
+  },
+  "timeline": {
+    "entryOpensAt": "2026-10-13T18:32:08.197Z",
+    "admissionStartsAt": "2026-10-13T18:33:38.197Z",
+    "liveSecBeforeEntry": 56,
+    "freezeSeenSecAfterAdmission": 4.2,
+    "soldOutSeenSecAfterAdmission": 32.2
+  },
+  "peakJoinsPerSec": {
+    "planned": 526,
+    "sent": 2448,
+    "accepted": 2448
+  },
+  "buyers": {
+    "outcomes": {
+      "saw sold out while waiting": 4234,
+      "arrived after sold out": 542,
+      "ordered": 200,
+      "admitted, sold out": 24
+    },
+    "withTicket": 4458,
+    "early": 3968,
+    "late": 490,
+    "ticketAttempts": {
+      "1": 4451,
+      "2": 6,
+      "3": 1
+    },
+    "timeToTicketMs": {
+      "p50": 4166,
+      "p95": 7004,
+      "p99": 7571,
+      "max": 7899
+    },
+    "sendLagMs": {
+      "p50": 1706,
+      "p95": 5558,
+      "p99": 5884,
+      "max": 5977
+    },
+    "claimsBeforeTheirTurn": 0
+  },
+  "steps": {
+    "ticket": {
+      "requests": 4466,
+      "throttled429": 8,
+      "server5xx": 0,
+      "networkErrors": 0,
+      "codes": {
+        "OK": 4458,
+        "HTTP_429": 8
+      },
+      "latencyMs": {
+        "p50": 1675,
+        "p95": 2539,
+        "p99": 2870,
+        "max": 3548
+      }
+    },
+    "claim": {
+      "requests": 224,
+      "throttled429": 0,
+      "server5xx": 0,
+      "networkErrors": 0,
+      "codes": {
+        "OK": 200,
+        "VARIANT_SOLD_OUT": 24
+      },
+      "latencyMs": {
+        "p50": 39,
+        "p95": 925,
+        "p99": 1078,
+        "max": 1274
+      }
+    },
+    "confirm": {
+      "requests": 200,
+      "throttled429": 0,
+      "server5xx": 0,
+      "networkErrors": 0,
+      "codes": {
+        "OK": 200
+      },
+      "latencyMs": {
+        "p50": 55,
+        "p95": 1177,
+        "p99": 1236,
+        "max": 1424
+      }
+    },
+    "state": {
+      "requests": 250,
+      "throttled429": 0,
+      "server5xx": 0,
+      "networkErrors": 0,
+      "codes": {
+        "OK": 250
+      },
+      "latencyMs": {
+        "p50": 31,
+        "p95": 102,
+        "p99": 304,
+        "max": 11945
+      }
+    }
+  },
+  "server": {
+    "unitsOut": 200,
+    "shardState": [
+      {
+        "shard": 0,
+        "sold": 50,
+        "capacity": 50
+      },
+      {
+        "shard": 1,
+        "sold": 50,
+        "capacity": 50
+      },
+      {
+        "shard": 2,
+        "sold": 50,
+        "capacity": 50
+      },
+      {
+        "shard": 3,
+        "sold": 50,
+        "capacity": 50
+      }
+    ],
+    "orders": 200,
+    "unitsOrdered": 200,
+    "activeHolds": 0,
+    "earlyCount": 3968,
+    "queue": {
+      "earlyCount": 3968,
+      "lateTickets": 510
+    }
+  },
+  "fairness": {
+    "earlyTickets": 3968,
+    "arrivalVsDrawCorrelation": 0.002
+  },
+  "joinsPerSecond": [
+    {
+      "t": 5,
+      "sent": 105,
+      "ok": 105,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 6,
+      "sent": 2448,
+      "ok": 2448,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 7,
+      "sent": 19,
+      "ok": 19,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 8,
+      "sent": 19,
+      "ok": 19,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 9,
+      "sent": 20,
+      "ok": 12,
+      "throttled": 8,
+      "failed": 0
+    },
+    {
+      "t": 10,
+      "sent": 21,
+      "ok": 21,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 11,
+      "sent": 19,
+      "ok": 19,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 12,
+      "sent": 19,
+      "ok": 19,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 13,
+      "sent": 15,
+      "ok": 15,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 14,
+      "sent": 22,
+      "ok": 22,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 15,
+      "sent": 17,
+      "ok": 17,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 16,
+      "sent": 24,
+      "ok": 24,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 17,
+      "sent": 20,
+      "ok": 20,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 18,
+      "sent": 17,
+      "ok": 17,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 19,
+      "sent": 21,
+      "ok": 21,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 20,
+      "sent": 19,
+      "ok": 19,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 21,
+      "sent": 20,
+      "ok": 20,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 22,
+      "sent": 13,
+      "ok": 13,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 23,
+      "sent": 15,
+      "ok": 15,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 24,
+      "sent": 19,
+      "ok": 19,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 25,
+      "sent": 20,
+      "ok": 20,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 26,
+      "sent": 16,
+      "ok": 16,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 27,
+      "sent": 20,
+      "ok": 20,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 28,
+      "sent": 10,
+      "ok": 10,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 29,
+      "sent": 20,
+      "ok": 20,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 30,
+      "sent": 23,
+      "ok": 23,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 31,
+      "sent": 14,
+      "ok": 14,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 32,
+      "sent": 15,
+      "ok": 15,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 33,
+      "sent": 18,
+      "ok": 18,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 34,
+      "sent": 29,
+      "ok": 29,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 35,
+      "sent": 20,
+      "ok": 20,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 36,
+      "sent": 22,
+      "ok": 22,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 37,
+      "sent": 12,
+      "ok": 12,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 38,
+      "sent": 17,
+      "ok": 17,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 39,
+      "sent": 16,
+      "ok": 16,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 40,
+      "sent": 15,
+      "ok": 15,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 41,
+      "sent": 10,
+      "ok": 10,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 42,
+      "sent": 10,
+      "ok": 10,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 43,
+      "sent": 14,
+      "ok": 14,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 44,
+      "sent": 15,
+      "ok": 15,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 45,
+      "sent": 20,
+      "ok": 20,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 46,
+      "sent": 20,
+      "ok": 20,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 47,
+      "sent": 19,
+      "ok": 19,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 48,
+      "sent": 17,
+      "ok": 17,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 49,
+      "sent": 17,
+      "ok": 17,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 50,
+      "sent": 17,
+      "ok": 17,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 51,
+      "sent": 15,
+      "ok": 15,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 52,
+      "sent": 17,
+      "ok": 17,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 53,
+      "sent": 18,
+      "ok": 18,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 54,
+      "sent": 17,
+      "ok": 17,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 55,
+      "sent": 14,
+      "ok": 14,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 56,
+      "sent": 24,
+      "ok": 24,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 57,
+      "sent": 17,
+      "ok": 17,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 58,
+      "sent": 20,
+      "ok": 20,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 59,
+      "sent": 15,
+      "ok": 15,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 60,
+      "sent": 19,
+      "ok": 19,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 61,
+      "sent": 17,
+      "ok": 17,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 62,
+      "sent": 15,
+      "ok": 15,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 63,
+      "sent": 13,
+      "ok": 13,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 64,
+      "sent": 18,
+      "ok": 18,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 65,
+      "sent": 12,
+      "ok": 12,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 66,
+      "sent": 18,
+      "ok": 18,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 67,
+      "sent": 13,
+      "ok": 13,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 68,
+      "sent": 24,
+      "ok": 24,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 69,
+      "sent": 19,
+      "ok": 19,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 70,
+      "sent": 18,
+      "ok": 18,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 71,
+      "sent": 19,
+      "ok": 19,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 72,
+      "sent": 23,
+      "ok": 23,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 73,
+      "sent": 20,
+      "ok": 20,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 74,
+      "sent": 11,
+      "ok": 11,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 75,
+      "sent": 27,
+      "ok": 27,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 76,
+      "sent": 21,
+      "ok": 21,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 77,
+      "sent": 15,
+      "ok": 15,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 78,
+      "sent": 10,
+      "ok": 10,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 79,
+      "sent": 17,
+      "ok": 17,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 80,
+      "sent": 20,
+      "ok": 20,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 81,
+      "sent": 23,
+      "ok": 23,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 82,
+      "sent": 13,
+      "ok": 13,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 83,
+      "sent": 11,
+      "ok": 11,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 84,
+      "sent": 16,
+      "ok": 16,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 85,
+      "sent": 12,
+      "ok": 12,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 86,
+      "sent": 16,
+      "ok": 16,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 87,
+      "sent": 21,
+      "ok": 21,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 93,
+      "sent": 19,
+      "ok": 19,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 94,
+      "sent": 18,
+      "ok": 18,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 95,
+      "sent": 19,
+      "ok": 19,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 96,
+      "sent": 15,
+      "ok": 15,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 97,
+      "sent": 18,
+      "ok": 18,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 98,
+      "sent": 25,
+      "ok": 25,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 99,
+      "sent": 10,
+      "ok": 10,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 100,
+      "sent": 24,
+      "ok": 24,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 101,
+      "sent": 10,
+      "ok": 10,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 102,
+      "sent": 16,
+      "ok": 16,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 103,
+      "sent": 14,
+      "ok": 14,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 104,
+      "sent": 17,
+      "ok": 17,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 105,
+      "sent": 14,
+      "ok": 14,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 106,
+      "sent": 14,
+      "ok": 14,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 107,
+      "sent": 16,
+      "ok": 16,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 108,
+      "sent": 15,
+      "ok": 15,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 109,
+      "sent": 14,
+      "ok": 14,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 110,
+      "sent": 12,
+      "ok": 12,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 111,
+      "sent": 21,
+      "ok": 21,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 112,
+      "sent": 10,
+      "ok": 10,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 113,
+      "sent": 14,
+      "ok": 14,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 114,
+      "sent": 21,
+      "ok": 21,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 115,
+      "sent": 17,
+      "ok": 17,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 116,
+      "sent": 17,
+      "ok": 17,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 117,
+      "sent": 22,
+      "ok": 22,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 118,
+      "sent": 15,
+      "ok": 15,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 119,
+      "sent": 16,
+      "ok": 16,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 120,
+      "sent": 24,
+      "ok": 24,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 121,
+      "sent": 16,
+      "ok": 16,
+      "throttled": 0,
+      "failed": 0
+    },
+    {
+      "t": 122,
+      "sent": 7,
+      "ok": 7,
+      "throttled": 0,
+      "failed": 0
+    }
+  ]
+}

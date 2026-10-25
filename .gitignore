@@ -11,3 +11,4 @@ coverage/
 tmp/
 *.tsbuildinfo
 apps/web/public/config.json
+.DS_Store

@@ -70,6 +70,8 @@ async function handle(event: APIGatewayProxyEventV2) {
     const opens = entryOpensAt(drop).getTime();
     if (now < opens) throw new ApiError('NOT_LIVE', 'The queue has not opened yet', Math.ceil((opens - now) / 1000));
 
+    // Before any counter write: a join that fails on the key lookup must not leave an entry nobody holds.
+    const key = await tokenKey();
     const start = admissionStartsAt(drop);
     const exp = Date.parse(drop.endAt) + drop.holdSec * 1000;
     let claims: TicketClaims;
@@ -91,7 +93,7 @@ async function handle(event: APIGatewayProxyEventV2) {
 
     // One structured line per ticket: the fairness experiment compares arrival order with admission order.
     console.log(JSON.stringify({ metric: 'ticket', t, d, arrival: now, ...position, block, instance }));
-    return json(201, { ticket: sign(claims, await tokenKey()), ...position, admissionStartsAt: new Date(start).toISOString() });
+    return json(201, { ticket: sign(claims, key), ...position, admissionStartsAt: new Date(start).toISOString() });
   } catch (err) {
     return errorResult(err);
   }

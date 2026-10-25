@@ -32,7 +32,8 @@ A classic scalable web app splits its work into stages (content in, heavy proces
     - **Fixed price:** WAF with an IP rate limit on a separate, API-only CloudFront distribution. That is US$6 a month and fractions of a cent per drop (platform B below).
     - **Flat rate:** a CloudFront flat-rate plan. Pro is US$15 a month for 10M requests, with WAF included and no overage charges; Business is US$200 a month for 125M.
 - **Autoscaling** is built into Lambda, API Gateway and on-demand DynamoDB.
-  - The ceiling that matters is the account's Lambda concurrency quota. In the sandbox it is **400** (checked 2026-10-07 with `aws lambda get-account-settings`). At about 80 ms per call that allows roughly 5,000 API calls a second, well above the 1,000-a-second stage throttle.
+  - The ceiling that matters is the account's Lambda concurrency quota. In the sandbox it is **400** (checked 2026-10-07 with `aws lambda get-account-settings`), shared by every stage and function in the account.
+  - Running copies answer a join in about 15 ms, so 400 would carry thousands of calls a second. A crowd arriving together meets new copies instead, whose first request takes about 1.25 s (start plus first run), so about 320 joins a second used all 400 in `eval/load.ts` runs (2026-10-13 to 10-16) and the excess was refused with 503. The ticket function is capped per stage (`ticketConcurrency`) and the buyer page spreads and retries joins; `docs/degradation.md` has the numbers.
   - Cold starts at the opening second can be removed with provisioned concurrency for just the drop window (about US$0.04 per drop, included in platform B). Whether it is needed comes from the elasticity measurement.
 
 ## What drives the cost
