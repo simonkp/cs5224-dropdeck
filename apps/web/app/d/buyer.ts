@@ -70,6 +70,34 @@ export class BuyerApiError extends Error {
   }
 }
 
+/** Longest random wait before a pre-draw join, and how far short of the draw it must stop. */
+export const JOIN_SPREAD_MS = 10_000;
+export const JOIN_SPREAD_MARGIN_MS = 5_000;
+
+/**
+ * How long a join tapped before the draw waits before it is sent. The draw is random (decision 0003), so the wait
+ * does not change the buyer's place; it turns a crowd tapping in the same second into a stream the ticket function
+ * can serve (eval/load.ts --spread-sec measures it). After the draw, places are first come, first served: no wait.
+ */
+export function joinSpreadMs(drawAt: number, now: number, random: () => number = Math.random): number {
+  const room = drawAt - JOIN_SPREAD_MARGIN_MS - now;
+  return room > 0 ? random() * Math.min(JOIN_SPREAD_MS, room) : 0;
+}
+
+/** Retries after the first try, matching eval/load.ts (six attempts in all). */
+export const JOIN_RETRIES = 5;
+
+/**
+ * Wait before retrying a refused join, or undefined to give up. Refused in the opening rush (429 throttle, 503 at
+ * the ticket function's cap, other 5xx) or a dropped connection: back off with jitter so the crowd's retries spread
+ * out while new copies start. Anything else (a real refusal) is shown to the buyer.
+ */
+export function joinRetryMs(e: unknown, attempt: number, random: () => number = Math.random): number | undefined {
+  const busy = e instanceof BuyerApiError ? e.status === 429 || e.status >= 500 : e instanceof TypeError;
+  if (!busy || attempt >= JOIN_RETRIES) return undefined;
+  return Math.min(8000, 500 * 2 ** attempt) * (0.5 + random());
+}
+
 export async function buyerApi<T>(path: string, init: { method?: string; body?: unknown; token?: string } = {}): Promise<T> {
   const cfg = await loadConfig();
   const r = await fetch(`${cfg.apiUrl}${path}`, {

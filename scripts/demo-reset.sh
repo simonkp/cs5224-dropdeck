@@ -38,7 +38,9 @@ pool="$(aws cloudformation describe-stacks --stack-name "DropDeck-$stage" \
   --query "Stacks[0].Outputs[?OutputKey=='UserPoolId'].OutputValue" --output text 2>/dev/null || true)"
 [ -n "$pool" ] && [ "$pool" != "None" ] || { echo "No stack DropDeck-$stage in account $account. Deploy it first." >&2; exit 1; }
 if [ -z "$owner" ]; then
-  mapfile -t emails < <(aws cognito-idp list-users --user-pool-id "$pool" \
+  # A read loop, not mapfile: macOS ships bash 3.2, which has no mapfile.
+  emails=()
+  while IFS= read -r line; do emails+=("$line"); done < <(aws cognito-idp list-users --user-pool-id "$pool" \
     --query "Users[].Attributes[?Name=='email'].Value" --output text | tr '\t' '\n' | sed '/^$/d')
   site="$(aws cloudformation describe-stacks --stack-name "DropDeck-$stage" --query "Stacks[0].Outputs[?OutputKey=='SiteUrl'].OutputValue" --output text)"
   if [ "${#emails[@]}" -eq 1 ]; then
@@ -58,4 +60,5 @@ if [[ "$stage" != dev* ]]; then
   force=(--force)
 fi
 cd "$(dirname "$0")/.."
-pnpm --silent seed -- --stage "$stage" --owner "$owner" --clear "${force[@]}" "${extra[@]}"
+# ${a[@]+"${a[@]}"}: bash 3.2 treats an empty array as unset under set -u.
+pnpm --silent seed -- --stage "$stage" --owner "$owner" --clear ${force[@]+"${force[@]}"} ${extra[@]+"${extra[@]}"}

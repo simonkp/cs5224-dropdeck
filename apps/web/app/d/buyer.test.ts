@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { admittedAt, admittedCount, watermark, type PublicState } from '@dropdeck/shared';
-import { ClockEstimate, FAST_LEAD_MS, loadDetails, pollInterval, queueStatus, saveDetails } from './buyer';
+import { BuyerApiError, ClockEstimate, FAST_LEAD_MS, JOIN_RETRIES, JOIN_SPREAD_MARGIN_MS, JOIN_SPREAD_MS, joinRetryMs, joinSpreadMs, loadDetails, pollInterval, queueStatus, saveDetails } from './buyer';
 
 const state = (admitted: number, early: number): PublicState => ({
   state: 'Live', serverTime: '', ...watermark(admitted, early), earlyCount: early, soldOut: {},
@@ -106,5 +106,49 @@ describe('pollInterval', () => {
     expect(pollInterval({ ...open, stage: 'held', ahead: null })).toBe(10_000);
     expect(pollInterval({ ...open, hidden: true })).toBe(15_000);
     expect(pollInterval({ ...open, state: { ...live, state: 'Closed' } })).toBe(30_000);
+  });
+});
+
+describe('joinSpreadMs', () => {
+  const draw = 10 * 60_000;
+
+  it('waits up to the full spread when the draw is far away', () => {
+    expect(joinSpreadMs(draw, 0, () => 0)).toBe(0);
+    expect(joinSpreadMs(draw, 0, () => 0.999999)).toBeCloseTo(JOIN_SPREAD_MS, -1);
+  });
+
+  it('never sends a join later than the margin before the draw', () => {
+    for (const before of [JOIN_SPREAD_MS + 60_000, JOIN_SPREAD_MS, 8_000, JOIN_SPREAD_MARGIN_MS + 1]) {
+      const now = draw - before;
+      expect(now + joinSpreadMs(draw, now, () => 0.999999)).toBeLessThanOrEqual(draw - JOIN_SPREAD_MARGIN_MS);
+    }
+  });
+
+  it('sends at once inside the margin and after the draw (first come, first served)', () => {
+    expect(joinSpreadMs(draw, draw - JOIN_SPREAD_MARGIN_MS, () => 0.5)).toBe(0);
+    expect(joinSpreadMs(draw, draw + 1, () => 0.5)).toBe(0);
+  });
+});
+
+describe('joinRetryMs', () => {
+  const err = (status: number, code = 'X') => new BuyerApiError(status, code, '');
+
+  it('retries throttling, capacity and server errors and dropped connections', () => {
+    for (const e of [err(429), err(503), err(500, 'INTERNAL'), new TypeError('Failed to fetch')]) {
+      expect(joinRetryMs(e, 0, () => 0.5)).toBe(500);
+    }
+  });
+
+  it('does not retry a real refusal', () => {
+    for (const e of [err(400, 'VALIDATION'), err(409, 'NOT_LIVE'), err(404, 'NOT_FOUND'), new Error('other')]) {
+      expect(joinRetryMs(e, 0)).toBeUndefined();
+    }
+  });
+
+  it('backs off with jitter and stops after the last retry', () => {
+    expect(joinRetryMs(err(503), 3, () => 0)).toBe(2000);
+    expect(joinRetryMs(err(503), 3, () => 1)).toBe(6000);
+    expect(joinRetryMs(err(503), 9, () => 1)).toBeUndefined();
+    expect(joinRetryMs(err(503), JOIN_RETRIES, () => 0.5)).toBeUndefined();
   });
 });

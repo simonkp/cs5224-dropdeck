@@ -14,7 +14,7 @@ import { message, mmss, price, time } from '../../lib/format';
 import { copyText } from '../../lib/share';
 import { cn } from '../../lib/utils';
 import {
-  buyerApi, BuyerApiError, loadDetails, loadSession, queueStatus, saveDetails, saveSession,
+  buyerApi, BuyerApiError, joinRetryMs, joinSpreadMs, loadDetails, loadSession, queueStatus, saveDetails, saveSession,
   type BuyerDetails, type BuyerSession, type Confirmation,
 } from './buyer';
 import { CompactHeader, Footer, Page, ShopHeader, StateCard, StatusPill, TitleBlock } from './parts';
@@ -80,6 +80,7 @@ export function Buyer({ ids, drop, state, serverNow }: { ids: Ids; drop: PublicD
   const [session, setSessionState] = useState<BuyerSession | null>(() => loadSession(ids.t, ids.d));
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [spreading, setSpreading] = useState(false);
   const setSession = useCallback((s: BuyerSession | null) => {
     saveSession(ids.t, ids.d, s);
     setSessionState(s);
@@ -94,6 +95,12 @@ export function Buyer({ ids, drop, state, serverNow }: { ids: Ids; drop: PublicD
     setBusy(true);
     setNotice(null);
     try {
+      const spread = joinSpreadMs(Date.parse(drop.openAt), serverNow);
+      if (spread > 0) {
+        setSpreading(true);
+        await new Promise((res) => setTimeout(res, spread));
+        setSpreading(false);
+      }
       for (let attempt = 0; ; attempt++) {
         try {
           const r = await buyerApi<{ ticket: string; r?: number; n?: number }>(`/api/d/${ids.t}/${ids.d}/ticket`);
@@ -102,8 +109,13 @@ export function Buyer({ ids, drop, state, serverNow }: { ids: Ids; drop: PublicD
         } catch (e) {
           // Tapped a moment before the queue opened on the server: wait as told and try again. The random extra
           // delay spreads a crowd of early taps instead of having them all retry in the same instant.
-          if (!(e instanceof BuyerApiError && e.code === 'NOT_LIVE' && e.retryAfter && e.retryAfter <= 10 && attempt < 3)) throw e;
-          await new Promise((res) => setTimeout(res, e.retryAfter! * 1000 + Math.random() * 1000));
+          if (e instanceof BuyerApiError && e.code === 'NOT_LIVE' && e.retryAfter && e.retryAfter <= 10 && attempt < 3) {
+            await new Promise((res) => setTimeout(res, e.retryAfter! * 1000 + Math.random() * 1000));
+            continue;
+          }
+          const wait = joinRetryMs(e, attempt);
+          if (wait === undefined) throw e;
+          await new Promise((res) => setTimeout(res, wait));
         }
       }
     } catch (e) {
@@ -137,7 +149,9 @@ export function Buyer({ ids, drop, state, serverNow }: { ids: Ids; drop: PublicD
   const bar = busy ? (
     <>
       <Button size="lg" className="w-full" aria-busy="true" disabled><Spinner />Joining…</Button>
-      <p className="text-center text-[13px] text-muted">The queue is just opening. Trying again in a moment, no need to tap.</p>
+      <p className="text-center text-[13px] text-muted">{spreading
+        ? 'Places are drawn at random, so there is no rush. Joining in a few seconds, no need to tap.'
+        : 'The queue is just opening. Trying again in a moment, no need to tap.'}</p>
     </>
   ) : (
     <>

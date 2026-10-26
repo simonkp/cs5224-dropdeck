@@ -1,0 +1,50 @@
+{
+  "at": "2026-10-13T10:47:38.286Z",
+  "stage": "dev-fw",
+  "drop": "eval-cb377b/oversell-941af2",
+  "n": 500,
+  "m": 50,
+  "qty": 1,
+  "shards": 4,
+  "won": 50,
+  "sold": 50,
+  "refusals": {
+    "claim:VARIANT_SOLD_OUT": 450
+  },
+  "shardState": [
+    {
+      "shard": 0,
+      "sold": 13,
+      "capacity": 13
+    },
+    {
+      "shard": 1,
+      "sold": 13,
+      "capacity": 13
+    },
+    {
+      "shard": 2,
+      "sold": 12,
+      "capacity": 12
+    },
+    {
+      "shard": 3,
+      "sold": 12,
+      "capacity": 12
+    }
+  ],
+  "activeHolds": 50,
+  "checks": {
+    "soldEqualsWon": true,
+    "noShardOverCapacity": true,
+    "soldIsMinNM": true,
+    "onlySoldOutRefusals": true,
+    "holdsMatchClaims": true
+  },
+  "pass": true,
+  "claimLatencyMs": {
+    "p50": 1404.038458,
+    "p95": 1526.9922500000002,
+    "p99": 1609.2377910000005
+  }
+}

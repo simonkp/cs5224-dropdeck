@@ -31,6 +31,7 @@ const stack = review ? new ReviewSiteStack(app, 'DropDeck-UiReview', { env, redi
   budgetEmail: String(app.node.tryGetContext('budgetEmail') ?? ''),
   webOrigins: (app.node.tryGetContext('webOrigins') as string[] | undefined) ?? [],
   ticketBlockSize: Number(app.node.tryGetContext('ticketBlockSize') ?? 10),
+  ticketConcurrency: setting('ticketConcurrency') === undefined ? undefined : Number(setting('ticketConcurrency')),
   mailFrom: setting('mailFrom'),
   operationsEnabled: setting('operationsEnabled') === 'true',
   merchantAnalyticsEnabled: setting('merchantAnalyticsEnabled') === 'true',
