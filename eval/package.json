@@ -23,7 +23,7 @@
     "@aws-sdk/client-scheduler": "^3.1146.0",
     "@aws-sdk/lib-dynamodb": "^3.1146.0",
     "@dropdeck/shared": "workspace:*",
-    "undici": "^7.30.1"
+    "undici": "^8.12.3"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
