@@ -13,7 +13,7 @@ When a crowd taps Join together, the ticket function needs one Lambda copy per j
 ## The change
 
 1. **Key first.** The ticket function fetches its signing key before writing to the draw, so a failed join leaves nothing behind (`services/ticket/src/handler.ts`).
-2. **Cap on ticket copies.** The new `ticketConcurrency` setting reserves and limits the ticket function's copies. It is unset by default; `dev-fw` uses 128, set in `infra/cdk.json` under `stageSettings`. Joins over the cap are refused with 503 before any code runs (`infra/lib/dropdeck-stack.ts`).
+2. **Cap on ticket copies.** The new `ticketConcurrency` setting reserves and limits the ticket function's copies. No stage sets it. Set it per stage in `infra/cdk.json` under `stageSettings`, or with `-c ticketConcurrency=128` on deploy, as the tests below did on `dev-fw`. Joins over the cap are refused with 503 before any code runs (`infra/lib/dropdeck-stack.ts`).
 3. **The page retries.** A join refused with 429 or 5xx, or a dropped connection, is retried up to 5 times with growing, randomised pauses (`apps/web/app/d/buyer.ts`, `joinRetryMs`).
 4. **The page spreads joins.** A join made before the draw waits a random 0–10 s first, and the page says "no rush". Places in the draw are random, so the delay costs the buyer nothing (decision 0003). Joins after the draw are sent at once (`joinSpreadMs`).
 

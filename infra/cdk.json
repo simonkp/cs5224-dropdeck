@@ -17,8 +17,7 @@
         "operationsEnabled": true,
         "merchantAnalyticsEnabled": true,
         "growthAnalyticsPreviewEnabled": true
-      },
-      "dev-fw": { "ticketConcurrency": 128 }
+      }
     }
   }
 }
