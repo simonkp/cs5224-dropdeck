@@ -9,9 +9,9 @@
   },
   "dependencies": {
     "@dropdeck/shared": "workspace:*",
-    "@aws-sdk/client-cognito-identity-provider": "^3.1146.0",
-    "@aws-sdk/client-dynamodb": "^3.1146.0",
-    "@aws-sdk/lib-dynamodb": "^3.1146.0"
+    "@aws-sdk/client-cognito-identity-provider": "^3.1156.0",
+    "@aws-sdk/client-dynamodb": "^3.1156.0",
+    "@aws-sdk/lib-dynamodb": "^3.1156.0"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.164",
