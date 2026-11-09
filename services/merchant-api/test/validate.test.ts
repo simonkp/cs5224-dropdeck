@@ -14,6 +14,10 @@ describe('drop validation', () => {
     const out = validateDropInput(valid);
     expect(out.variants?.[0]?.id).toBe('v1');
   });
+  it.each([false, true])('accepts a five-day duration (partial: %s)', (partial) => {
+    const dates = { openAt: '2026-10-31T01:00:00.000Z', endAt: '2026-11-05T01:00:00.000Z' };
+    expect(validateDropInput(partial ? dates : { ...valid, ...dates }, partial)).toMatchObject(dates);
+  });
   it('rejects an end before the open', () => {
     expect(() => validateDropInput({ ...valid, endAt: '2026-10-31T00:00:00Z' })).toThrow(ApiError);
   });

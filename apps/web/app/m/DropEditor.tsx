@@ -161,7 +161,7 @@ function Editor({ ctx, drop: d }: { ctx: ConsoleCtx; drop?: Drop }) {
                 onChange={(v) => { if (v === 'custom') setCustomLength(true); else { setCustomLength(false); setLengthMin(v); } }}
                 options={LENGTH_OPTIONS.map((m) => ({ value: m, label: m === 'custom' ? 'Custom' : Number(m) >= 60 ? `${Number(m) / 60} hr` : `${m} min` }))}
               />
-              {customLength && <Input type="number" min={1} max={1440} required value={lengthMin} onChange={(e) => setLengthMin(e.target.value)} aria-label="Length in minutes" />}
+              {customLength && <Input type="number" min={1} required value={lengthMin} onChange={(e) => setLengthMin(e.target.value)} aria-label="Length in minutes" />}
             </div>
             {queueOpens && closes && <p className="text-[13px] text-muted">Queue opens {time(queueOpens.getTime())} · draw {time(open.getTime())} · closes {time(closes.getTime())}</p>}
           </Section>
