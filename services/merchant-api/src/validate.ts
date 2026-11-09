@@ -100,7 +100,6 @@ export function validateDropInput(body: Record<string, unknown>, partial = false
   if (out.openAt && out.endAt) {
     const span = Date.parse(out.endAt) - Date.parse(out.openAt);
     if (span <= 0) fail('endAt must be after openAt');
-    if (span > 24 * 3600_000) fail('a drop can last at most 24 hours');
   }
   return out;
 }
