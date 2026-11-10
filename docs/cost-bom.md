@@ -88,7 +88,7 @@ Polls per session: 142 as built, against 360 with the fixed 2 s poll it replaced
 | A. DropDeck as built (adaptive polling) | $0.05 | $1.35 | pay per use; idle month ≈ storage only |
 | B. A + WAF on the API + warm Lambdas | $6.05 | $1.39 | optional hardening, not built |
 | C. Classic servers: ALB + EC2 auto scaling + cache | $161 | $1.61 | always-on servers; +4 × c7g.large for 1 h per drop |
-| D. On-premise (sized for the peak) | $550 | $0.05 | fixed cost whatever the traffic; bandwidth in colocation |
+| D. On-premise behind the same CDN | $550 | $1.33 | servers and staff time fixed; CloudFront for pages and polls |
 
 <details><summary>A. DropDeck as built (adaptive polling): fixed items</summary>
 
@@ -126,7 +126,7 @@ Polls per session: 142 as built, against 360 with the fixed 2 s poll it replaced
 
 </details>
 
-<details><summary>D. On-premise (sized for the peak): fixed items</summary>
+<details><summary>D. On-premise behind the same CDN: fixed items</summary>
 
 | Item | Quantity | Per month |
 | --- | --- | --- |
@@ -146,21 +146,35 @@ Merchant mix (assumed): 60% Starter (2 small drops), 30% Growth (4 reference dro
 | A. DropDeck as built (adaptive polling) | $20 | $98 | $393 | 96% | 96% | 96% |
 | B. A + WAF on the API + warm Lambdas | $26 | $107 | $411 | 95% | 96% | 96% |
 | C. Classic servers: ALB + EC2 auto scaling + cache | $185 | $279 | $632 | 63% | 89% | 94% |
-| D. On-premise (sized for the peak) | $550 | $553 | $564 | -9% | 78% | 94% |
+| D. On-premise behind the same CDN | $569 | $647 | $938 | -13% | 74% | 91% |
 | Revenue (all platforms) | $504 | $2519 | $10077 |  |  |  |
 
 At 200 shops that is 500 drops a month (240 reference-size). Margins exclude people, payment fees and taxes.
+
+### Small-seller scenario
+
+Assumed: every shop on Starter (S$29 a month), 2 drops a month of 40 units and 400 buyer sessions each. As built, one such drop costs $0.13.
+
+| Platform | 10 shops: cost | 50 shops: cost | 200 shops: cost | 10 shops: gross margin | 50 shops: gross margin | 200 shops: gross margin |
+| --- | --- | --- | --- | --- | --- | --- |
+| A. DropDeck as built (adaptive polling) | $2.58 | $13 | $51 | 99% | 99% | 99% |
+| B. A + WAF on the API + warm Lambdas | $9.34 | $23 | $72 | 96% | 98% | 98% |
+| C. Classic servers: ALB + EC2 auto scaling + cache | $170 | $205 | $335 | 24% | 82% | 92% |
+| D. On-premise behind the same CDN | $553 | $565 | $611 | -148% | 49% | 86% |
+| Revenue (all platforms) | $223 | $1115 | $4462 |  |  |  |
 
 <!-- BOM:END -->
 
 ## Reading the comparison
 
-- **At our size (tens of shops), serverless wins by a wide margin.** The idle month costs cents, so a quiet month cannot make the service insolvent. The classic stack costs about US$161 a month before the first drop. On-premise costs about US$550, and it still needs a CDN in front, or it must be sized for thousands of requests a second at every opening.
-- **At a few hundred shops, the always-on designs catch up,** because per-drop polling cost grows with every drop while their fixed cost is shared. That is the point to reconsider:
+- **Serverless is the cheapest platform at every size modelled.** The idle month costs cents, so a quiet month cannot make the service insolvent. The classic stack costs about US$161 a month before the first drop, and on-premise about US$550.
+- **On-premise is shown behind the same CDN as the cloud platforms.** A 100 Mbps colocation link carries only about three reference drops' pages and polls at once, so serving the crowd from the servers is not a realistic alternative. Its per-drop cost is therefore close to DropDeck's; the difference is the fixed cost. Only the on-premise row includes staff time (about US$154 a month); adding the same time to the cloud rows would not change the order.
+- **Without the CDN, on-premise would undercut DropDeck at about 290 shops** in the reference mix, which is why the CDN assumption matters. The levers that keep the serverless cost down as drops multiply:
   - polling intervals (the biggest lever; see the sensitivity table)
   - a CloudFront flat-rate plan, which caps request cost
   - pushing admission updates instead of polling them
-- **Revenue covers cost in every scenario above 10 shops.** The pricing in decision 0007 charges for buyer sessions beyond the Growth allowance, so revenue grows with the same thing that drives cost.
+- **The margins depend on the merchant mix.** The reference mix assumes every Growth shop runs four 5,000-session drops and pays for the extra sessions, which is most of the revenue. The small-seller scenario (all Starter, small drops) is closer to the sellers surveyed; serverless keeps a high margin there, while at 10 shops classic servers keep about a quarter of revenue and on-premise loses money.
+- **No single always-on server was benchmarked** against the reference peak, so the on-premise sizing is a planning estimate.
 
 ## Assumptions to replace with measurements
 
@@ -170,5 +184,5 @@ At 200 shops that is 500 drops a month (240 reference-size). Margins exclude peo
 | Sessions per reference drop | 5,000 | `USAGE#` records (`GET /m/usage`, the ops page) |
 | Orders per unit, holds per order | 1 per 1.5 units, 1.3 | `USAGE#` orders and units; hold count from the logs |
 | Merchant mix and drops per month | 60/30/10 Starter/Growth/Event | Pilot merchants |
-| On-premise costs | S$3,500 per server, S$300 colocation, 4 h ops a month | Vendor quotes |
+| On-premise costs | S$3,500 per server, S$300 colocation, 4 h ops a month | Planning estimates from list prices; replace with quotations |
 | Exchange rate | S$1.30 per US$ | — |

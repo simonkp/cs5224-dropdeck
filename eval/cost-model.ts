@@ -159,7 +159,9 @@ function platforms(w: Workload): Platform[] {
     // Same edge traffic (pages and polls still go through CloudFront); the API calls hit the servers already paid
     // for, plus four extra instances for the hour around each drop.
     { name: 'C. Classic servers: ALB + EC2 auto scaling + cache', fixedLines: classic, fixedUsd: sum(classic), perDropUsd: () => edgeOnly + 4 * P.ec2C7gLarge, note: 'always-on servers; +4 × c7g.large for 1 h per drop' },
-    { name: 'D. On-premise (sized for the peak)', fixedLines: onPremSgd, fixedUsd: sum(onPremSgd), perDropUsd: () => 0.05, note: 'fixed cost whatever the traffic; bandwidth in colocation' },
+    // Same CDN as A and C: a 100 Mbps colocation link cannot serve a crowd's pages and polls itself (about three
+    // reference drops at once), so the edge traffic is billed here too. Only D carries staff time; A to C carry none.
+    { name: 'D. On-premise behind the same CDN', fixedLines: onPremSgd, fixedUsd: sum(onPremSgd), perDropUsd: () => edgeOnly + 0.05, note: 'servers and staff time fixed; CloudFront for pages and polls' },
   ];
 }
 
@@ -173,6 +175,13 @@ function monthly(merchants: number) {
   const revenueSgd = starter * 29 + growth * (79 + growthOverage) + event * 19;
   return { starter, growth, event, drops, revenueUsd: revenueSgd / SGD_PER_USD };
 }
+
+/**
+ * Small-seller scenario (assumed): every shop on Starter, two drops a month of 40 units and 400 buyer sessions each.
+ * Sized to sellers with tens of orders a month rather than the reference drop; replace with measured values.
+ */
+const SMALL_SELLER: Workload = { ...REFERENCE, sessions: 400, units: 40, dropMinutes: 30, merchantViewMinutes: 15 };
+const SMALL_DROPS_PER_SHOP = 2;
 
 // ---------------------------------------------------------------- output
 
@@ -226,6 +235,22 @@ function render(w: Workload, measured: boolean): string {
   t(rows);
   const m200 = monthly(200);
   out.push(`At 200 shops that is ${m200.drops.reference + m200.drops.small} drops a month (${m200.drops.reference} reference-size). Margins exclude people, payment fees and taxes.`, '');
+
+  const sw = measured ? w : SMALL_SELLER;
+  const sDrop = sum(perDrop(sw, 'adaptive'));
+  const sEdge = sum(perDrop(sw, 'adaptive').filter((l) => l.item.startsWith('CloudFront')));
+  out.push('### Small-seller scenario', '');
+  out.push(`Assumed: every shop on Starter (S$29 a month), ${SMALL_DROPS_PER_SHOP} drops a month of ${sw.units} units and ${sw.sessions} buyer sessions each. As built, one such drop costs ${usd(sDrop)}.`, '');
+  const sRows: string[][] = [['Platform', ...sizes.map((m) => `${m} shops: cost`), ...sizes.map((m) => `${m} shops: gross margin`)]];
+  const sPer: Record<string, number> = { A: sDrop, B: sum(perDrop(sw, 'adaptive', { waf: true, pcMinutes: 30 })), C: sEdge + 4 * P.ec2C7gLarge, D: sEdge + 0.05 };
+  for (const p of ps) {
+    const per = sPer[p.name[0]!]!;
+    const cost = sizes.map((m) => p.fixedUsd + m * SMALL_DROPS_PER_SHOP * per);
+    const rev = sizes.map((m) => (m * 29) / SGD_PER_USD);
+    sRows.push([p.name, ...cost.map(usd), ...cost.map((c, i) => `${Math.round(((rev[i]! - c) / rev[i]!) * 100)}%`)]);
+  }
+  sRows.push(['Revenue (all platforms)', ...sizes.map((m) => usd((m * 29) / SGD_PER_USD)), '', '', '']);
+  t(sRows);
   return out.join('\n');
 }
 
