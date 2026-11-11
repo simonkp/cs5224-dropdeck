@@ -9,9 +9,9 @@
   },
   "dependencies": {
     "@dropdeck/shared": "workspace:*",
-    "@aws-sdk/client-dynamodb": "^3.1146.0",
-    "@aws-sdk/lib-dynamodb": "^3.1146.0",
-    "@aws-sdk/client-sesv2": "^3.1146.0"
+    "@aws-sdk/client-dynamodb": "^3.1164.0",
+    "@aws-sdk/lib-dynamodb": "^3.1164.0",
+    "@aws-sdk/client-sesv2": "^3.1164.0"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.164",
